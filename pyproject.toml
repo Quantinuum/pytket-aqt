@@ -48,7 +48,7 @@ tracker = "https://github.com/Quantinuum/pytket-aqt/issues"
 find = {}
 
 [tool.setuptools.dynamic]
-version = {attr = "_metadata.__extension_version__"}
+version = {attr = "pytket.extensions.aqt._metadata.__extension_version__"}
 
 [build-system]
 requires = ["setuptools"]

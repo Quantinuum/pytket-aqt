@@ -14,9 +14,9 @@
 import json
 
 import numpy as np
+from pytket.circuit import Circuit, OpType
 from qiskit_aqt_provider.api_client import models
 
-from pytket.circuit import Circuit, OpType
 from pytket.extensions.aqt.backends.aqt import (
     AQTBackend,
     _aqt_rebase,

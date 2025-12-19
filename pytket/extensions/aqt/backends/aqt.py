@@ -18,9 +18,6 @@ from collections.abc import Sequence
 from typing import Any, assert_never, cast  # type: ignore
 
 import numpy
-from qiskit_aqt_provider.api_client import models, models_generated
-from qiskit_aqt_provider.aqt_provider import OFFLINE_SIMULATORS
-
 from pytket.backends import Backend, CircuitStatus, ResultHandle, StatusEnum
 from pytket.backends.backend import KwargTypes
 from pytket.backends.backend_exceptions import CircuitNotRunError, CircuitNotValidError
@@ -51,7 +48,10 @@ from pytket.predicates import (
 )
 from pytket.utils import prepare_circuit
 from pytket.utils.outcomearray import OutcomeArray
+from qiskit_aqt_provider.api_client import models, models_generated
+from qiskit_aqt_provider.aqt_provider import OFFLINE_SIMULATORS
 
+from .._metadata import __extension_version__
 from .aqt_api import (
     AQT_MOCK_DEVICES,
     AqtApi,
@@ -170,7 +170,7 @@ class AQTBackend(Backend):
         self._backend_info = fully_connected_backendinfo(
             type(self).__name__,
             aqt_resource_id,
-            "0.0.1",
+            __extension_version__,
             _AQT_MAX_QUBITS,
             _GATE_SET,
             misc={
@@ -222,7 +222,7 @@ class AQTBackend(Backend):
             fully_connected_backendinfo(
                 cls.__name__,
                 aqt_device.resource_id,
-                "0.0.1",
+                __extension_version__,
                 _AQT_MAX_QUBITS,
                 _GATE_SET,
                 misc={

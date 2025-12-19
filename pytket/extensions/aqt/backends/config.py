@@ -18,9 +18,8 @@ from dataclasses import dataclass
 from getpass import getpass
 from typing import Any, ClassVar
 
-from qiskit_aqt_provider.aqt_provider import AQTProvider
-
 from pytket.config import PytketExtConfig
+from qiskit_aqt_provider.aqt_provider import AQTProvider
 
 logger = logging.getLogger()
 

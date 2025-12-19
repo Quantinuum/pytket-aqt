@@ -13,9 +13,9 @@
 # limitations under the License.
 
 import pytest
-
 from pytket.backends import ResultHandle
 from pytket.circuit import Circuit
+
 from pytket.extensions.aqt.backends.aqt_multi_zone import (
     AQTMultiZoneBackend,
     get_aqt_json_syntax_for_compiled_circuit,

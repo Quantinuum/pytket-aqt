@@ -14,7 +14,6 @@
 from copy import deepcopy
 
 from networkx import bfs_layers
-
 from pytket.circuit import Circuit, Command, OpType, Qubit
 
 from ...circuit.helpers import (

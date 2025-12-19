@@ -12,8 +12,8 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 import pytest
-
 from pytket.circuit import Circuit
+
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_config import (
     RoutingConfig,

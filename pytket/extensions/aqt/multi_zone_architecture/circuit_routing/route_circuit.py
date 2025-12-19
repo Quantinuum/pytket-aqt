@@ -14,8 +14,9 @@
 import logging
 from copy import deepcopy
 
-from pytket import OpType
 from pytket.circuit import Circuit, Command
+
+from pytket import OpType
 
 from ..circuit.helpers import TrapConfiguration, ZonePlacement, get_qubit_to_zone
 from ..circuit.multizone_circuit import MultiZoneCircuit
