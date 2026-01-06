@@ -1,16 +1,21 @@
 # pytket-aqt
 
+[![Slack](https://img.shields.io/badge/Slack-4A154B?style=for-the-badge&logo=slack&logoColor=white)](https://tketusers.slack.com/join/shared_invite/zt-18qmsamj9-UqQFVdkRzxnXCcKtcarLRA#)
+[![Stack Exchange](https://img.shields.io/badge/StackExchange-%23ffffff.svg?style=for-the-badge&logo=StackExchange)](https://quantumcomputing.stackexchange.com/tags/pytket)
+
 [Pytket](https://tket.quantinuum.com/api-docs/index.html) is a python module for interfacing
 with tket, a quantum computing toolkit and optimising compiler developed by Quantinuum.
 
 `pytket-aqt` is an extension to `pytket` that allows `pytket` circuits to be
 executed on AQT's ([Alpine Quantum Technologies'](https://www.aqt.eu/)) quantum devices and simulators.
 
-See [extension documentation](https://cqcl.github.io/pytket-aqt/api/index.html) for more.
+Some useful links:
+
+- [API Documentation](https://tket.quantinuum.com/extensions/pytket-aqt/)
 
 ## Getting started
 
-`pytket-aqt` is available for Python 3.11 and 3.12, on Linux, MacOS
+`pytket-aqt` is compatible with Python versions 3.10 to 3.13 on Linux, MacOS
 and Windows. To install, run:
 
 ```shell
@@ -20,86 +25,26 @@ pip install pytket-aqt
 This will install `pytket` if it isn't already installed, and add new classes
 and methods into the `pytket.extensions` namespace.
 
-## Available devices
-
-`pytket-aqt` offers offline simulators for aqt devices that do not require special access.
-Access to remote simulators and machines can be configured by providing an AQT access token.
-
-To see which devices are available to you, use the `AQTBackend.print_device_table` method.
-This method will prompt for an access token if none has been configured. Providing a token at the
-prompt will store it in memory for further API use. Skip the prompt to see the available offline
-simulators. It is also possible to store and use your access token across sessions using
-`config.set_aqt_config`.
-
-## Ion Shuttling
-
-The `AQTMultiZoneBackend` supports routing of a circuit to a particular segmented ion-trap architecture before submission. This feature is experimental and not necessary for any currently available AQT devices. Using the graph partitioning based algorithms within this context requires the [mt-kahypar](https://github.com/kahypar/mt-kahypar) package.
-
-On Windows based systems, `mtkahypar` is not installable via `pip` and will not be included with `pytket-aqt` as a dependency. It must be compiled and installed manually (see the instructions provided in the mt-kahypar repository for a manual
-installation).
-
 ## Bugs, support and feature requests
 
 Please file bugs and feature requests on the Github
-[issue tracker](https://github.com/CQCL/pytket-aqt/issues).
-
-There is also a Slack channel for discussion and support. Click [here](https://tketusers.slack.com/join/shared_invite/zt-18qmsamj9-UqQFVdkRzxnXCcKtcarLRA#/shared-invite/email) to join.
+[issue tracker](https://github.com/Quantinuum/pytket-aqt/issues).
 
 ## Development
 
-This project uses [Poetry](https://python-poetry.org/) for packaging and dependency management task automation.
-
-### Recommended development setup
-
-Install development tools:
+To install an extension in editable mode run:
 
 ```shell
-pip install -r dev-tool-requirements.txt
+pip install -e .
 ```
 
-### Local development
-
-To install the local package, its dependencies and various development dependencies run:
+We have set up the repo to be used with uv. You can use also:
 
 ```shell
-poetry install --with tests,docs,mypy,pre-commit
+uv sync --python 3.12
 ```
 
-This will install the dependencies within an isolated virtual environment managed by Poetry. To activate that environment run:
-
-```shell
-poetry shell
-```
-
-Within this environment, the following commands can be used:
-
-```shell
-# run tests
-pytest tests
-# run mypy
-mypy --config-file=mypy.ini --no-incremental --explicit-package-bases pytket tests
-# run pre-commit checks
-pre-commit run --all-files --show-diff-on-failure
-# build documentation
-./docs/build-docs
-```
-
-To exit the Poetry environment, run:
-
-```shell
-exit
-```
-
-[Pre-commit](https://pre-commit.com/) can be used to run the pre-commit hooks before each commit. This is recommended.
-To set up the pre-commit hooks to run automatically on each commit run:
-
-```shell
-poetry run pre-commit install
-```
-
-Afterward, the [pre-configured hooks](.pre-commit-config.yaml) will run on all changed files in a commit and the commit will be
-rejected if the hooks find errors. Some hooks will correct formatting issues automatically (but will still reject the commit, so that
-the `git commit` command will need to be repeated).
+to install the package. This will automatically pick up all requirements for the tests as well.
 
 ## Contributing
 
@@ -109,20 +54,37 @@ tests and is accepted after review, it will be merged in.
 
 ### Code style
 
-#### Formatting and Linting
+#### Formatting
 
-All code will be checked on the CI with [ruff](https://docs.astral.sh/ruff/)
-as configured within the `pre-commit` checks. These checks should be
-run locally before any pull request submission using `pre-commit` directly (see above).
-The used versions of the formatting ad linting tools is specified in the [pyproject.toml](pyproject.toml).
+All code should be formatted using
+[ruff](https://docs.astral.sh/ruff/formatter/), with default options. This is
+checked on the CI.
 
 #### Type annotation
 
 On the CI, [mypy](https://mypy.readthedocs.io/en/stable/) is used as a static
 type checker and all submissions must pass its checks. You should therefore run
-`mypy` locally on any changed files before submitting a PR.
+`mypy` locally on any changed files before submitting a PR. You can run them with:
 
-### Adding Tests
+```shell
+uv run mypy --config-file=mypy.ini --no-incremental --explicit-package-bases pytket tests
+```
 
-When adding a new feature, please add appropriate tests for it within the [tests](tests) directory. When fixing a bug, please
+#### Linting
+
+We use [ruff](https://github.com/astral-sh/ruff) on the CI to check compliance with a set of style requirements (listed in `ruff.toml`).
+You should run `ruff` over any changed files before submitting a PR, to catch any issues.
+
+An easy way to meet all formatting and linting requirements is to issue `pre-commit run --all-files`.
+
+### Tests
+
+To run the tests for a module:
+
+1. `cd` into that module's `tests` directory;
+2. ensure you have installed `pytest`, `hypothesis`, and any modules listed in
+   the `test-requirements.txt` file (all via `pip`);
+3. run `pytest`.
+
+When adding a new feature, please add a test for it. When fixing a bug, please
 add a test that demonstrates the fix.

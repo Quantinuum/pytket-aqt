@@ -104,7 +104,7 @@ def test_compilation_settings_linearch(
         routing=routing_settings,
     )
     compiled = backend.compile_and_route_circuit(ghz_circuit, compilation_settings)
-    print("Shuttles: ", compiled.get_n_shuttles())  # noqa: T201
+    print("Shuttles: ", compiled.get_n_shuttles())
 
 
 manual_placement_grid = InitialPlacementSettings(
@@ -144,4 +144,4 @@ def test_compilation_settings_gridarch(
         routing=routing_settings,
     )
     compiled = backend.compile_and_route_circuit(ghz_circuit, compilation_settings)
-    print("Shuttles: ", compiled.get_n_shuttles())  # noqa: T201
+    print("Shuttles: ", compiled.get_n_shuttles())

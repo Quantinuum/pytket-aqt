@@ -13,7 +13,7 @@
 # limitations under the License.
 import importlib
 
-MT_KAHYPAR_INSTALLED = importlib.util.find_spec("mtkahypar") is not None
+MT_KAHYPAR_INSTALLED = importlib.util.find_spec("mtkahypar") is not None  # type: ignore
 """Whether or not the mtkahypar package is available"""
 
 
