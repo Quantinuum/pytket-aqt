@@ -25,7 +25,7 @@ classifiers = [
     "Topic :: Scientific/Engineering",
 ]
 dependencies = [
-    "pytket >=2.10",
+    "pytket >=2.11",
     "requests >=2.22",
     "types-requests",
     "pydantic >=2.0",
