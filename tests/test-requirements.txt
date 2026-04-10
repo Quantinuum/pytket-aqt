@@ -1,5 +1,0 @@
-pytest
-pytest-timeout
-pytest-httpx
-hypothesis
-requests_mock

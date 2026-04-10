@@ -1,17 +1,22 @@
 [project]
 name = "pytket-aqt"
-version = "0.38.0"
-description = "Extension for pytket, providing access to AQT backends"
-authors = [{name = "TKET development team", email= "tket-support@quantinuum.com"}]
-license = "Apache 2"
+dynamic = ["version"]
+requires-python = ">=3.11,<4.0"
+
+description = "Extension for pytket, TODOPYTKETEXT"
+license = { file = "LICENSE" }
 readme = "README.md"
-repository = "https://github.com/CQCL/pytket-aqt"
-documentation = "https://cqcl.github.io/pytket-aqt/api/index.html"
-classifiers= [
+authors = [
+    { name = "TKET development team", email = "tket-support@quantinuum.com" }
+]
+maintainers = [
+    { name = "TKET development team", email = "tket-support@quantinuum.com" },
+]
+classifiers = [
     "Environment :: Console",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
-    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3.13",
     "Operating System :: MacOS :: MacOS X",
     "Operating System :: POSIX :: Linux",
     "Operating System :: Microsoft :: Windows",
@@ -19,9 +24,8 @@ classifiers= [
     "Intended Audience :: Science/Research",
     "Topic :: Scientific/Engineering",
 ]
-requires-python = ">=3.11,<3.13"
 dependencies = [
-    "pytket >=2.5",
+    "pytket >=2.11",
     "requests >=2.22",
     "types-requests",
     "pydantic >=2.0",
@@ -32,86 +36,32 @@ dependencies = [
     "numpy (>=2.3.4,<3.0.0)",
     "notebook (>=7.4.7,<8.0.0)",
     "types-networkx (>=3.5.0.20251106)",
-
 ]
 
-[tool.poetry]
-packages = [{include = "pytket"}]
+[project.urls]
+documentation = "https://tket.quantinuum.com/extensions/pytket-aqt/index.html"
+source = "https://github.com/Quantinuum/pytket-aqt"
+tracker = "https://github.com/Quantinuum/pytket-aqt/issues"
 
-[tool.poetry.urls]
-"Bug Tracker" = "https://github.com/CQCL/pytket-aqt/issues"
+[tool.setuptools.packages]
+find = {}
 
-[tool.poetry.group.tests]
-optional = true
-
-[tool.poetry.group.tests.dependencies]
-pytest = "*"
-pytest-timeout = ">=1.4.2,<3.0.0"
-hypothesis = "*"
-requests_mock = "*"
-numpy = "*"
-qiskit-aqt-provider = {version = ">=1.10.0", extras = ["test"]}
-
-[tool.poetry.group.mypy]
-optional = true
-
-[tool.poetry.group.mypy.dependencies]
-mypy = "^1.0"
-
-[tool.poetry.group.coverage]
-optional = true
-
-[tool.poetry.group.coverage.dependencies]
-coverage = {extras = ["toml"], version = ">=6.1,<8.0"}
-
-[tool.poetry.group.pre-commit]
-optional = true
-
-[tool.poetry.group.pre-commit.dependencies]
-pre-commit = ">=2.15,<5.0"
-pyupgrade = ">=2.29,<4.0"
-
-[tool.poetry.group.docs]
-optional = true
-
-[tool.poetry.group.docs.dependencies]
-sphinx  = ">=4.3.2,<8.0.0"
-sphinx_book_theme = ">= 1.0.1, < 2.0"
-sphinx-copybutton = "*"
-docutils = "*"
-types-docutils = "*"
-
-[tool.poetry.group.jupyter]
-optional = true
-
-[tool.poetry.group.jupyter.dependencies]
-jupyter = "^1.0.0"
-ipykernel = "^6.29.5"
-
-[tool.mypy]
-warn_unused_configs = true
-disallow_untyped_decorators = false
-disallow_untyped_calls = true
-disallow_untyped_defs = true
-disallow_incomplete_defs = true
-no_implicit_optional = true
-strict_optional = true
-namespace_packages = true
-check_untyped_defs = true
-warn_redundant_casts = true
-warn_unused_ignores = true
-warn_no_return = false
-warn_return_any = true
-warn_unreachable = true
-
-[[tool.mypy.overrides]]
-module = [
-    'mypy-pytest.*',
-    'mypy-lark.*'
-]
-ignore_missing_imports = true
-ignore_errors = true
+[tool.setuptools.dynamic]
+version = {attr = "pytket.extensions.aqt._metadata.__extension_version__"}
 
 [build-system]
-requires = ["poetry-core>=2.0.0"]
-build-backend = "poetry.core.masonry.api"
+requires = ["setuptools"]
+build-backend = "setuptools.build_meta"
+
+[tool.uv]
+dev-dependencies = [
+    "pytest >=8.3.2,<9",
+    "pytest-timeout ~=2.4.0",
+    "ruff >=0.6.2,<0.7",
+    "mypy >=1.11.1,<2",
+    "hypothesis >=6.111.1,<7",
+    "pre-commit >=3.8.0,<4",
+    "pyupgrade >=2.29,<4.0",
+    "pytest-httpx",
+    "requests_mock",
+]

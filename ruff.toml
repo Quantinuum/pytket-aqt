@@ -1,8 +1,11 @@
 exclude = [
-    "docs/pytket-docs-theming",
+    "docs/pytket-docs-theming/*",
     "docs/examples/*",
-    "examples/*"
+    "docs/quantinuum-sphinx/*",
+    "docs/quantinuum-sphinx/_static/syncTheme.global.js",
+    "docs/quantinuum-sphinx/_static/injectNav.global.js",
 ]
+
 
 target-version = "py311"
 
@@ -10,7 +13,7 @@ lint.select = [
     "A",
     "AIR",
     # "ANN",
-    # "ARG", # TODO
+    # "ARG",
     "ASYNC",
     "B",
     "BLE",
@@ -25,7 +28,7 @@ lint.select = [
     "DTZ",
     "E",
     # "EM",
-    # "ERA", # TODO
+    # "ERA",
     "EXE",
     "F",
     "FA",
@@ -49,8 +52,8 @@ lint.select = [
     "PIE",
     "PL",
     # "PT",
-    # "PTH", # TODO
-    # "PYI", # TODO
+    # "PTH",
+    # "PYI",
     "Q",
     "R",
     "RET",
@@ -61,7 +64,6 @@ lint.select = [
     "SLF",
     "SLOT",
     "T10",
-    "T20",
     "TCH",
     # "TD",
     # "TID",

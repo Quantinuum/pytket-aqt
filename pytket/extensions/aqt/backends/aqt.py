@@ -51,7 +51,7 @@ from pytket.utils.outcomearray import OutcomeArray
 from qiskit_aqt_provider.api_client import models, models_generated
 from qiskit_aqt_provider.aqt_provider import OFFLINE_SIMULATORS
 
-from ..extension_version import __extension_version__
+from .._metadata import __extension_version__
 from .aqt_api import (
     AQT_MOCK_DEVICES,
     AqtApi,
