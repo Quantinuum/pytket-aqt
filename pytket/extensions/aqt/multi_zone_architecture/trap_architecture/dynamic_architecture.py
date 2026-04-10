@@ -12,7 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from collections.abc import Generator
+from collections.abc import Generator, Iterable
 from copy import deepcopy
 
 import numpy as np
@@ -89,6 +89,12 @@ class DynamicArch:
     def connection_ports(self, zone1: int, zone2: int) -> tuple[int, int]:
         port1, port2 = self._macro_arch.get_connected_ports(zone1, zone2)
         return port1.value, port2.value
+
+    def connected_zones(self, zone: int) -> Iterable[int]:
+        return self._macro_arch.connected_zones(zone)
+
+    def connected_zones_per_port(self, zone: int) -> tuple[list[int], list[int]]:
+        return self._macro_arch.connected_zones_per_port(zone)
 
     @property
     def n_zones(self) -> int:

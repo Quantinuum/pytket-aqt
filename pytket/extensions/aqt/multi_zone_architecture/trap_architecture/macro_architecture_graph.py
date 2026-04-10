@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
@@ -77,6 +78,17 @@ class MultiZoneArch:
     def shortest_path(self, zone_1: int, zone_2: int) -> list[int]:
         _, path = self.shortest_path_with_length(zone_1, zone_2)
         return path
+
+    def connected_zones(self, zone) -> Iterable[int]:
+        return self.zone_graph.neighbors(zone)
+
+    def connected_zones_per_port(self, zone) -> tuple[list[int], list[int]]:
+        neighbors = self.zone_graph.neighbors(zone)
+        port_connections = ([], [])
+        for neighbor in neighbors:
+            port_connection, _ = self.get_connected_ports(zone, neighbor)
+            port_connections[port_connection.value].append(neighbor)
+        return port_connections
 
     def shortest_path_with_length(
         self, zone_1: int, zone_2: int

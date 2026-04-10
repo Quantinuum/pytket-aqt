@@ -15,6 +15,12 @@ import pytest
 from pytket.circuit import Circuit
 
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+    GreedyGateSelector,
+)
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
+    PathClearingRouter,
+)
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_config import (
     RoutingConfig,
 )
@@ -75,6 +81,10 @@ else:
     hypergraph_routing = RoutingConfig()
 
 greedy_routing = RoutingConfig()
+greedy_path_clearing_routing = RoutingConfig(
+    gate_selector=GreedyGateSelector(only_place_gate_qubits=True),
+    router=PathClearingRouter(),
+)
 
 graph_skipif = pytest.mark.skipif(
     not MT_KAHYPAR_INSTALLED, reason="mtkahypar required for testing graph partitioning"
@@ -85,12 +95,17 @@ graph_skipif = pytest.mark.skipif(
     "opt_level, initial_pl_settings, routing_settings",
     [
         pytest.param(0, manual_placement, greedy_routing),
+        pytest.param(0, manual_placement, greedy_path_clearing_routing),
         pytest.param(0, manual_placement, graph_routing, marks=graph_skipif),
         pytest.param(0, manual_placement, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, ordered_placement, greedy_routing),
+        pytest.param(0, ordered_placement, greedy_path_clearing_routing),
         pytest.param(0, ordered_placement, graph_routing, marks=graph_skipif),
         pytest.param(0, ordered_placement, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, greedy_routing, marks=graph_skipif),
+        pytest.param(
+            0, graph_placement, greedy_path_clearing_routing, marks=graph_skipif
+        ),
         pytest.param(0, graph_placement, graph_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, hypergraph_routing, marks=graph_skipif),
     ],
@@ -130,12 +145,17 @@ manual_placement_grid = InitialPlacementSettings(
     "opt_level, initial_pl_settings, routing_settings",
     [
         pytest.param(0, manual_placement_grid, greedy_routing),
+        pytest.param(0, manual_placement_grid, greedy_path_clearing_routing),
         pytest.param(0, manual_placement_grid, graph_routing, marks=graph_skipif),
         pytest.param(0, manual_placement_grid, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, ordered_placement, greedy_routing),
+        pytest.param(0, ordered_placement, greedy_path_clearing_routing),
         pytest.param(0, ordered_placement, graph_routing, marks=graph_skipif),
         pytest.param(0, ordered_placement, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, greedy_routing, marks=graph_skipif),
+        pytest.param(
+            0, graph_placement, greedy_path_clearing_routing, marks=graph_skipif
+        ),
         pytest.param(0, graph_placement, graph_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, hypergraph_routing, marks=graph_skipif),
     ],

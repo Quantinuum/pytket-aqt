@@ -155,3 +155,71 @@ grid12_mod = MultiZoneArchitectureSpec(
     )
     + get_all_to_all_port_connections([(9, PortId.p1), (11, PortId.p1)]),
 )
+
+
+"""
+gate_zone_type_examples:
+
+Has gate zones in terminal (i.e. only one connected zone) positions (0, 10)
+ and with two (4), three (6), and 6 (11) connected zones
+
+* = gate zone
+
+0* -- 1 -|- 2 -|- 3 -- 4* -- 5
+         6*    7
+         |- 8 -|- 9 -- 10*
+               11*
+           12 -|- 13
+               14
+
+for horizontal zones port 0 is left, port 1 is right
+for vertical zones port 0 is up, port 1 is down
+"""
+n_zones = 15
+zone_max = 4
+gate_zone_type_examples = MultiZoneArchitectureSpec(
+    n_qubits_max=30,
+    n_zones=n_zones,
+    zones=[
+        (
+            Zone(max_ions_gate_op=zone_max)
+            if i in [0, 4, 6, 10, 11]
+            else Zone(max_ions_gate_op=zone_max, memory_only=True)
+        )
+        for i in range(n_zones)
+    ],
+    connections=[
+        # horizontal connections
+        *[
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
+                zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
+            )
+            for i in [0, 1, 2, 3, 4, 8, 9, 12]
+        ],
+        # vertical connections
+        *[
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=i, port_id=pi),
+                zone_port_spec1=PortSpec(zone_id=j, port_id=pj),
+            )
+            for i, pi, j, pj in [
+                (1, PortId.p1, 6, PortId.p0),
+                (2, PortId.p0, 6, PortId.p0),
+                (8, PortId.p0, 6, PortId.p1),
+                (3, PortId.p1, 7, PortId.p0),
+                (4, PortId.p0, 7, PortId.p0),
+                (8, PortId.p1, 7, PortId.p1),
+                (9, PortId.p0, 7, PortId.p1),
+                (11, PortId.p0, 7, PortId.p1),
+                (8, PortId.p1, 11, PortId.p0),
+                (9, PortId.p0, 11, PortId.p0),
+                (12, PortId.p1, 11, PortId.p1),
+                (13, PortId.p0, 11, PortId.p1),
+                (14, PortId.p0, 11, PortId.p1),
+                (12, PortId.p1, 14, PortId.p0),
+                (13, PortId.p0, 14, PortId.p0),
+            ]
+        ],
+    ],
+)

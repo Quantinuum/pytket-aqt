@@ -4,6 +4,12 @@ import pytest
 
 from pytket import Circuit
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+    GreedyGateSelector,
+)
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
+    PathClearingRouter,
+)
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_config import (
     RoutingConfig,
 )
@@ -18,6 +24,7 @@ from pytket.extensions.aqt.multi_zone_architecture.initial_placement.settings im
     InitialPlacementSettings,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
+    gate_zone_type_examples,
     grid12,
     grid12_mod,
     racetrack,
@@ -90,6 +97,10 @@ grid_backend = AQTMultiZoneBackend(architecture=grid12, access_token="invalid")
 
 grid_mod_backend = AQTMultiZoneBackend(architecture=grid12_mod, access_token="invalid")
 
+gate_zones_types_backend = AQTMultiZoneBackend(
+    architecture=gate_zone_type_examples, access_token="invalid"
+)
+
 order_init = InitialPlacementSettings(
     algorithm=InitialPlacementAlg.qubit_order,
     zone_free_space=2,
@@ -100,6 +111,14 @@ greedy_compilation_settings = CompilationSettings(
     pytket_optimisation_level=1,
     initial_placement=order_init,
     routing=greedy_routing,
+)
+greedy_path_clearing_routing_settings = CompilationSettings(
+    pytket_optimisation_level=1,
+    initial_placement=order_init,
+    routing=RoutingConfig(
+        gate_selector=GreedyGateSelector(only_place_gate_qubits=True),
+        router=PathClearingRouter(),
+    ),
 )
 
 if MT_KAHYPAR_INSTALLED:
@@ -242,4 +261,34 @@ def test_quantum_advantage_grid_4_gate_zone(
     grid_mod_backend.route_compiled(
         adv_precomp4,
         compilation_settings,
+    )
+
+
+adv_precomp5 = gate_zones_types_backend.compile_circuit(
+    advantage_circuit_30, graph_compilation_settings
+)
+
+
+# @pytest.mark.parametrize(
+#    "compilation_settings",
+#    [
+#        pytest.param(legacy_compilation_settings, marks=skip_if_no_run_long_tests),
+#        pytest.param(greedy_compilation_settings, marks=skip_if_no_run_long_tests),
+#        pytest.param(
+#            graph_compilation_settings,
+#            marks=[skip_if_no_run_long_tests, graph_skipif],
+#        ),
+#        pytest.param(
+#            hypergraph_compilation_settings,
+#            marks=[skip_if_no_run_long_tests, graph_skipif],
+#        ),
+#        pytest.param(greedy_path_clearing_routing_settings, marks=skip_if_no_run_long_tests),
+#    ],
+# )
+def test_quantum_advantage_gate_zone_types_backend(
+    # compilation_settings: CompilationSettings,
+) -> None:
+    gate_zones_types_backend.route_compiled(
+        adv_precomp5,
+        greedy_path_clearing_routing_settings,
     )

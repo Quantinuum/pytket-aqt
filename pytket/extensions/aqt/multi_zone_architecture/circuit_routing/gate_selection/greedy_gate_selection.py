@@ -41,8 +41,10 @@ class GreedyGateSelector(GateSelector):
     def __init__(
         self,
         cost_model: RoutingCostModel = _DEFAULT_COST_MODEL,
+        only_place_gate_qubits: bool = False,
     ):
         self._cost_model = cost_model
+        self._only_specify_gate_qubits = only_place_gate_qubits
 
     def next_config(
         self,
@@ -100,7 +102,8 @@ class GreedyGateSelector(GateSelector):
                 qubit_tracker,
             )
         # Now move any unused qubits to vacant spots in new config
-        handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
+        if not self._only_specify_gate_qubits:
+            handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
         return qubit_tracker.new_placement()
 
     def handle_depth_list(
