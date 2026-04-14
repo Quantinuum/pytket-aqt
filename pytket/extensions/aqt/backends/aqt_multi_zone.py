@@ -44,8 +44,8 @@ from pytket.predicates import (
     Predicate,
 )
 
+from .._metadata import __extension_version__
 from ..backends.config import AQTConfig
-from ..extension_version import __extension_version__
 from ..multi_zone_architecture.circuit.multizone_circuit import (
     MultiZoneCircuit,
 )
