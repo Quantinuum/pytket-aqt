@@ -122,7 +122,7 @@ def filter_implementable_commands(
     )
     last_cmd_index = 0
     for i, cmd in enumerate(commands):
-        if cmd.op.type in [OpType.Barrier]:
+        if cmd.op.type == OpType.Barrier:
             implementable.append(cmd)
         last_cmd_index = i
         n_args = len(cmd.args)

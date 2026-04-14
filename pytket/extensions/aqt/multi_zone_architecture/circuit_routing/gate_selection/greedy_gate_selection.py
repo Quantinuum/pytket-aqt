@@ -228,7 +228,7 @@ def handle_only_single_qubits_remaining(
     # locked qubits have already been assigned a zone in the new config and should therefore not move again
     locked_qubits = []
     for cmd in remaining_commands:
-        if cmd.op.type in [OpType.Barrier]:
+        if cmd.op.type == OpType.Barrier:
             continue
         qubit0 = cmd.args[0].index[0]
         is_locked_0 = qubit0 in locked_qubits

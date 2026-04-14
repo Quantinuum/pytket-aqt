@@ -1,13 +1,16 @@
 from __future__ import annotations
+
 from dataclasses import dataclass
-from typing import TypeAlias
+from typing import TYPE_CHECKING, TypeAlias
 
 from networkx import (
     Graph,
 )
 
-from ..circuit.helpers import TrapConfiguration
 from .architecture import MultiZoneArchitectureSpec, PortId
+
+if TYPE_CHECKING:
+    from ..circuit.helpers import TrapConfiguration
 
 Node: TypeAlias = tuple[int, int]
 
@@ -55,20 +58,19 @@ class PebbleHoleGraph:
         for connection in spec.connections:
             zone0 = connection.zone_port_spec0.zone_id
             port0 = connection.zone_port_spec0.port_id
-            node0 = (zone0, 0 if port0 == PortId.p0 else self._zone_capacities[zone0] - 1)
+            node0 = (
+                zone0,
+                0 if port0 == PortId.p0 else self._zone_capacities[zone0] - 1,
+            )
             zone1 = connection.zone_port_spec1.zone_id
             port1 = connection.zone_port_spec1.port_id
-            node1 = (zone1, 0 if port1 == PortId.p0 else self._zone_capacities[zone1] - 1)
+            node1 = (
+                zone1,
+                0 if port1 == PortId.p0 else self._zone_capacities[zone1] - 1,
+            )
             self.pebble_graph.add_edge(
                 node0, node1, transport_cost=1, is_shuttle_edge=True
             )
-
-    def copy(self) -> PebbleHoleGraph:
-        copied = object.__new__(PebbleHoleGraph)
-        copied.pebble_graph = self.pebble_graph.copy(as_view=False)
-        copied._zone_capacities = self._zone_capacities.copy()
-        copied._zone_nodes = [zone_nodes.copy() for zone_nodes in self._zone_nodes]
-        return copied
 
     def occupant(self, node: Node) -> int:
         return int(self.pebble_graph.nodes[node]["occupant"])

@@ -1,4 +1,4 @@
 from .general_router import GeneralRouter
-from .path_clearing_router import PathClearingRouter
+from .line_arch_router import LineArchRouter
 
-__all__ = ["GeneralRouter", "PathClearingRouter"]
+__all__ = ["GeneralRouter", "LineArchRouter"]
