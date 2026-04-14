@@ -191,13 +191,16 @@ def test_compiled_circuit_has_correct_syntax(backend: AQTMultiZoneBackend) -> No
 
 greedy_routing = RoutingConfig()
 if MT_KAHYPAR_INSTALLED:
-    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.graph_partition_gate_selection import (
-        PartitionGateSelector,
+    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+        GraphPartitionGateSelector,
+        HypergraphPartitionGateSelector,
     )
 
-    graph_routing = RoutingConfig(gate_selector=PartitionGateSelector())
+    graph_routing = RoutingConfig(gate_selector=GraphPartitionGateSelector())
+    hypergraph_routing = RoutingConfig(gate_selector=HypergraphPartitionGateSelector())
 else:
     graph_routing = greedy_routing
+    hypergraph_routing = greedy_routing
 
 legacy_routing = RoutingConfig(use_legacy_greedy_method=True)
 
@@ -208,7 +211,11 @@ graph_skipif = pytest.mark.skipif(
 
 @pytest.mark.parametrize(
     "routing_settings",
-    [pytest.param(greedy_routing), pytest.param(graph_routing, marks=graph_skipif)],
+    [
+        pytest.param(greedy_routing),
+        pytest.param(graph_routing, marks=graph_skipif),
+        pytest.param(hypergraph_routing, marks=graph_skipif),
+    ],
 )
 def test_automatically_routed_circuit_has_correct_syntax(  # noqa: PLR0915
     backend: AQTMultiZoneBackend,

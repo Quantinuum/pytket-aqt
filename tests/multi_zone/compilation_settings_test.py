@@ -63,13 +63,16 @@ ordered_placement = InitialPlacementSettings(
 )
 
 if MT_KAHYPAR_INSTALLED:
-    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.graph_partition_gate_selection import (
-        PartitionGateSelector,
+    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+        GraphPartitionGateSelector,
+        HypergraphPartitionGateSelector,
     )
 
-    graph_routing = RoutingConfig(gate_selector=PartitionGateSelector())
+    graph_routing = RoutingConfig(gate_selector=GraphPartitionGateSelector())
+    hypergraph_routing = RoutingConfig(gate_selector=HypergraphPartitionGateSelector())
 else:
     graph_routing = RoutingConfig()
+    hypergraph_routing = RoutingConfig()
 
 greedy_routing = RoutingConfig()
 
@@ -83,10 +86,13 @@ graph_skipif = pytest.mark.skipif(
     [
         pytest.param(0, manual_placement, greedy_routing),
         pytest.param(0, manual_placement, graph_routing, marks=graph_skipif),
+        pytest.param(0, manual_placement, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, ordered_placement, greedy_routing),
         pytest.param(0, ordered_placement, graph_routing, marks=graph_skipif),
+        pytest.param(0, ordered_placement, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, greedy_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, graph_routing, marks=graph_skipif),
+        pytest.param(0, graph_placement, hypergraph_routing, marks=graph_skipif),
     ],
 )
 def test_compilation_settings_linearch(
@@ -125,10 +131,13 @@ manual_placement_grid = InitialPlacementSettings(
     [
         pytest.param(0, manual_placement_grid, greedy_routing),
         pytest.param(0, manual_placement_grid, graph_routing, marks=graph_skipif),
+        pytest.param(0, manual_placement_grid, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, ordered_placement, greedy_routing),
         pytest.param(0, ordered_placement, graph_routing, marks=graph_skipif),
+        pytest.param(0, ordered_placement, hypergraph_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, greedy_routing, marks=graph_skipif),
         pytest.param(0, graph_placement, graph_routing, marks=graph_skipif),
+        pytest.param(0, graph_placement, hypergraph_routing, marks=graph_skipif),
     ],
 )
 def test_compilation_settings_gridarch(

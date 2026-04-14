@@ -54,19 +54,25 @@ greedy_compilation_settings = CompilationSettings(
 )
 
 if MT_KAHYPAR_INSTALLED:
-    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.graph_partition_gate_selection import (
-        PartitionGateSelector,
+    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+        GraphPartitionGateSelector,
+        HypergraphPartitionGateSelector,
     )
 
     graph_compilation_settings = CompilationSettings(
         pytket_optimisation_level=1,
         initial_placement=order_init,
-        routing=RoutingConfig(gate_selector=PartitionGateSelector())
-        if MT_KAHYPAR_INSTALLED
-        else RoutingConfig(),
+        routing=RoutingConfig(gate_selector=GraphPartitionGateSelector()),
+    )
+
+    hypergraph_compilation_settings = CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(gate_selector=HypergraphPartitionGateSelector()),
     )
 else:
     graph_compilation_settings = greedy_compilation_settings
+    hypergraph_compilation_settings = greedy_compilation_settings
 
 
 legacy_compilation_settings = CompilationSettings(
@@ -88,6 +94,7 @@ graph_skipif = pytest.mark.skipif(
         pytest.param(legacy_compilation_settings),
         pytest.param(greedy_compilation_settings),
         pytest.param(graph_compilation_settings, marks=graph_skipif),
+        pytest.param(hypergraph_compilation_settings, marks=graph_skipif),
     ],
 )
 def test_circuit_with_dangling_single_qubit_gates(

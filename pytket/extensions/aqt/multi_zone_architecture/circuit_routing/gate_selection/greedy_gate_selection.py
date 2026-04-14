@@ -17,7 +17,7 @@ from copy import deepcopy
 from pytket.circuit import Command, OpType
 
 from ...circuit.helpers import ZonePlacement
-from ...depth_list.depth_list import depth_list_from_command_list
+from ...depth_list.depth_list import depth_info_from_command_list
 from ...trap_architecture.cost_model import (
     RoutingCostModel,
     ShuttlePSwapCostModel,
@@ -84,12 +84,14 @@ class GreedyGateSelector(GateSelector):
             n_qubits, dyn_arch.trap_configuration.zone_placement
         )
 
-        two_qubit_gate_depth_list = depth_list_from_command_list(
+        two_qubit_gate_depth_info = depth_info_from_command_list(
             n_qubits, remaining_commands
         )
 
-        if two_qubit_gate_depth_list:
-            self.handle_depth_list(dyn_arch, two_qubit_gate_depth_list, qubit_tracker)
+        if two_qubit_gate_depth_info.depth_list:
+            self.handle_depth_list(
+                dyn_arch, two_qubit_gate_depth_info.depth_list, qubit_tracker
+            )
         else:
             handle_only_single_qubits_remaining(
                 dyn_arch,

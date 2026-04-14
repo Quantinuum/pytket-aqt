@@ -16,7 +16,7 @@ from logging import getLogger
 
 import mtkahypar  # type: ignore
 
-from ...multi_zone_architecture.graph_algs.graph import GraphData
+from ...multi_zone_architecture.graph_algs.graph import GraphData, HypergraphData
 
 logger = getLogger(__name__)
 
@@ -63,6 +63,18 @@ class MtKahyparPartitioner:
             graph_data.edge_weights,
         )
 
+    def hypergraph_data_to_mtkahypar_hypergraph(
+        self, graph_data: HypergraphData
+    ) -> mtkahypar.Hypergraph:
+        return self.mtk.create_hypergraph(
+            self.context,
+            graph_data.n_vertices,
+            len(graph_data.nets),
+            graph_data.nets,
+            graph_data.vertex_weights,
+            graph_data.net_weights,
+        )
+
     def graph_data_to_mtkahypar_target_graph(
         self, graph_data: GraphData
     ) -> mtkahypar.TargetGraph:
@@ -102,6 +114,39 @@ class MtKahyparPartitioner:
         logger.debug(dbg_msg)
         vertex_part_id: list[int] = []
         for vertex in range(graph_data.n_vertices):
+            vertex_part_id.append(part_graph.block_id(vertex))  # noqa: PERF401
+        return vertex_part_id
+
+    def partition_hypergraph(
+        self,
+        hypergraph_data: HypergraphData,
+        num_parts: int,
+    ) -> list[int]:
+        """Partition vertices of graph into num_parts parts
+
+        Returns a list whose i'th element is the part that vertex i is assigned to
+
+        :param hypergraph_data: Graph specification
+        :param num_parts: Number of partitions
+        """
+        avg_part_weight = sum(hypergraph_data.vertex_weights) / num_parts
+        self.context.set_partitioning_parameters(
+            num_parts,
+            0.5 / avg_part_weight,
+            mtkahypar.Objective.CUT,
+        )
+        graph = self.hypergraph_data_to_mtkahypar_hypergraph(hypergraph_data)
+        if hypergraph_data.fixed_list:
+            graph.add_fixed_vertices(hypergraph_data.fixed_list, num_parts)
+        if hypergraph_data.part_max_sizes:
+            self.context.set_individual_target_block_weights(
+                hypergraph_data.part_max_sizes
+            )
+        part_graph = graph.partition(self.context)
+        dbg_msg = f"cut_cost: {part_graph.cut()}"
+        logger.debug(dbg_msg)
+        vertex_part_id: list[int] = []
+        for vertex in range(hypergraph_data.n_vertices):
             vertex_part_id.append(part_graph.block_id(vertex))  # noqa: PERF401
         return vertex_part_id
 

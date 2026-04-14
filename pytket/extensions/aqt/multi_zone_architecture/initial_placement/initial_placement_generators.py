@@ -19,7 +19,7 @@ from typing import Protocol
 from pytket.circuit import Circuit
 
 from ..circuit.helpers import ZonePlacement
-from ..depth_list.depth_list import DepthList, get_initial_depth_list
+from ..depth_list.depth_list import DepthList, get_initial_depth_info
 from ..graph_algs.graph import GraphData
 from ..graph_algs.mt_kahypar_check import (
     MT_KAHYPAR_INSTALLED,
@@ -136,8 +136,10 @@ class GraphMapInitialPlacement(InitialPlacementGenerator):
         _check_n_qubits(circuit, arch)
         n_parts = arch.n_zones
         n_qubits = circuit.n_qubits
-        initial_depth_list = get_initial_depth_list(circuit)
-        circuit_graph_data = self.get_circuit_graph_data(initial_depth_list, arch)
+        initial_depth_info = get_initial_depth_info(circuit)
+        circuit_graph_data = self.get_circuit_graph_data(
+            initial_depth_info.depth_list, arch
+        )
         arch_graph_data = self.get_arch_graph_data(arch)
         partitioner = MtKahyparPartitioner()
         vertex_to_part = partitioner.map_graph_to_target_graph(

@@ -103,20 +103,24 @@ greedy_compilation_settings = CompilationSettings(
 )
 
 if MT_KAHYPAR_INSTALLED:
-    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.graph_partition_gate_selection import (
-        PartitionGateSelector,
+    from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+        GraphPartitionGateSelector,
+        HypergraphPartitionGateSelector,
     )
 
-    graph_routing = RoutingConfig(
-        gate_selector=PartitionGateSelector(),
-    )
     graph_compilation_settings = CompilationSettings(
         pytket_optimisation_level=1,
         initial_placement=order_init,
-        routing=graph_routing,
+        routing=RoutingConfig(gate_selector=GraphPartitionGateSelector()),
+    )
+    hypergraph_compilation_settings = CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(gate_selector=HypergraphPartitionGateSelector()),
     )
 else:
     graph_compilation_settings = greedy_compilation_settings
+    hypergraph_compilation_settings = greedy_compilation_settings
 
 
 legacy_routing = RoutingConfig(use_legacy_greedy_method=True)
@@ -142,6 +146,10 @@ adv_precomp = racetrack_backend.compile_circuit(
             graph_compilation_settings,
             marks=[graph_skipif, skip_if_no_run_long_tests],
         ),
+        pytest.param(
+            hypergraph_compilation_settings,
+            marks=[graph_skipif, skip_if_no_run_long_tests],
+        ),
     ],
 )
 def test_quantum_advantage_racetrack_all_gate_zone(
@@ -162,6 +170,10 @@ adv_precomp2 = racetrack_4_gatezones_backend.compile_circuit(
         pytest.param(greedy_compilation_settings, marks=skip_if_no_run_long_tests),
         pytest.param(
             graph_compilation_settings,
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
+        pytest.param(
+            hypergraph_compilation_settings,
             marks=[skip_if_no_run_long_tests, graph_skipif],
         ),
     ],
@@ -189,6 +201,10 @@ adv_precomp3 = grid_backend.compile_circuit(
             graph_compilation_settings,
             marks=[skip_if_no_run_long_tests, graph_skipif],
         ),
+        pytest.param(
+            hypergraph_compilation_settings,
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
     ],
 )
 def test_quantum_advantage_grid_12_gate_zone(
@@ -212,6 +228,10 @@ adv_precomp4 = grid_mod_backend.compile_circuit(
         pytest.param(greedy_compilation_settings, marks=skip_if_no_run_long_tests),
         pytest.param(
             graph_compilation_settings,
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
+        pytest.param(
+            hypergraph_compilation_settings,
             marks=[skip_if_no_run_long_tests, graph_skipif],
         ),
     ],

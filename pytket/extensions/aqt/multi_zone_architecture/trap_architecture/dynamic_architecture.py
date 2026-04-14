@@ -57,6 +57,18 @@ class DynamicArch:
             [len(zone) for zone in self._current_config.zone_placement], dtype=np.int64
         )
         self.transport_free_space = self.zone_max_transport_cap - self.zone_occupancy
+        self._n_gate_zone_spots = int(
+            sum(
+                self.zone_max_gate_cap[gate_zone]
+                for gate_zone in self._macro_arch.gate_zones
+            )
+        )
+        self._largest_gate_zone_max_capacity = int(
+            max(
+                self.zone_max_gate_cap[gate_zone]
+                for gate_zone in self._macro_arch.gate_zones
+            )
+        )
 
     def shuttle_only_shortest_path_and_path_capacity(
         self, src_zone: int, trg_zone: int
@@ -97,6 +109,14 @@ class DynamicArch:
     @property
     def trap_configuration(self) -> TrapConfiguration:
         return self._current_config
+
+    @property
+    def n_gate_zone_spots(self) -> int:
+        return self._n_gate_zone_spots
+
+    @property
+    def largest_gate_zone_max_capacity(self) -> int:
+        return self._largest_gate_zone_max_capacity
 
     def move_qubits(
         self, qubits: list[int], src_zone: int, trg_zone: int, trg_port: int

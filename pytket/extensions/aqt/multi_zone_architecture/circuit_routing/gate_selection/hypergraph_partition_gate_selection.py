@@ -21,7 +21,7 @@ from ...depth_list.depth_list import (
     DepthInfo,
     depth_info_from_command_list,
 )
-from ...graph_algs.graph import GraphData
+from ...graph_algs.graph import HypergraphData
 from ...graph_algs.mt_kahypar_check import (
     MT_KAHYPAR_INSTALLED,
     MissingMtKahyparInstallError,
@@ -54,8 +54,8 @@ def log_depth_info(depth_info: DepthInfo) -> None:
 _DEFAULT_COST_MODEL = ShuttlePSwapCostModel()
 
 
-class GraphPartitionGateSelector(GateSelector):
-    """Uses graph partitioning to determine an optimal new placement of qubits
+class HypergraphPartitionGateSelector(GateSelector):
+    """Uses hypergraph partitioning to determine an optimal new placement of qubits
     in zones
 
     :param cost_model: Cost model for estimating movement costs
@@ -102,10 +102,12 @@ class GraphPartitionGateSelector(GateSelector):
     ) -> ZonePlacement:
         num_zones = dyn_arch.n_zones
         n_qubits = dyn_arch.n_qubits
-        shuttle_graph_data = self.get_circuit_shuttle_graph_data(dyn_arch, depth_info)
+        shuttle_graph_data = self.get_circuit_shuttle_hypergraph_data(
+            dyn_arch, depth_info
+        )
         partitioner = MtKahyparPartitioner()
         log_depth_info(depth_info)
-        vertex_to_part = partitioner.partition_graph(shuttle_graph_data, num_zones)
+        vertex_to_part = partitioner.partition_hypergraph(shuttle_graph_data, num_zones)
         new_placement: ZonePlacement = [[] for _ in range(num_zones)]
         part_to_zone = [-1] * num_zones
         for vertex in range(n_qubits, n_qubits + num_zones):
@@ -129,9 +131,9 @@ class GraphPartitionGateSelector(GateSelector):
         handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
         return qubit_tracker.new_placement()
 
-    def get_circuit_shuttle_graph_data(
+    def get_circuit_shuttle_hypergraph_data(  # noqa: PLR0912
         self, dyn_arch: DynamicArch, depth_info: DepthInfo
-    ) -> GraphData:
+    ) -> HypergraphData:
         """Calculate graph data for qubit-zone graph to be partitioned"""
         n_qubits = dyn_arch.n_qubits
         num_zones = dyn_arch.n_zones
@@ -141,10 +143,9 @@ class GraphPartitionGateSelector(GateSelector):
             for i in range(num_zones)
         ]
         num_spots = sum(places_per_zone)
-        edges: list[tuple[int, int]] = []
-        edge_weights: list[int] = []
+        nets: list[list[int]] = []
+        net_weights: list[int] = []
 
-        depth_list = depth_info.depth_list
         depth_blocks = depth_info.depth_blocks
         cutoff_depth = 1
         for _, blocks in enumerate(
@@ -157,32 +158,23 @@ class GraphPartitionGateSelector(GateSelector):
 
         max_gate_weight = 50000
 
-        # add gate edges
-        for depth, pairs in enumerate(depth_list[:cutoff_depth]):
-            weight = max_gate_weight - math.floor(
-                depth * max_gate_weight * 0.05
-            )  # reduce by 5% per depth
-            edges.extend(pairs)
-            edge_weights.extend([weight] * len(pairs))
-
-        # "Assign" qubits up to cutoff depth to gate zones with high weight
-        if dyn_arch.has_memory_zones:
-            depth_0_qubits = [q for block in depth_blocks[0] for q in block]
-            edge_pair_pairs = [
-                (q, zone + n_qubits)
-                for q in depth_0_qubits
-                for zone in dyn_arch.gate_zones
-            ]
-            edge_pair_weights = (
-                [math.floor(max_gate_weight)]
-                * len(depth_0_qubits)
-                * len(dyn_arch.gate_zones)
-            )
-            edges.extend(edge_pair_pairs)
-            edge_weights.extend(edge_pair_weights)
+        # add gate hyperedges
+        for depth, blocks in enumerate(depth_blocks[:cutoff_depth]):
+            for block in blocks:
+                weight = max_gate_weight - math.floor(
+                    depth * max_gate_weight * 0.01
+                )  # reduce by 5% per depth
+                if dyn_arch.has_memory_zones:
+                    for zone in dyn_arch.gate_zones:
+                        net = [*list(block), zone + n_qubits]
+                        nets.append(net)
+                    net_weights.extend([weight] * len(dyn_arch.gate_zones))
+                else:
+                    nets.append(list(block))
+                    net_weights.append(weight)
 
         # add shuttling penalty
-        max_shuttle_weight = math.floor(max_gate_weight * 0.5)
+        max_shuttle_weight = math.floor(max_gate_weight * 0.8)
         for zone, qubits in enumerate(dyn_arch.trap_configuration.zone_placement):
             for qubit in qubits:
                 for other_zone in range(num_zones):
@@ -195,13 +187,13 @@ class GraphPartitionGateSelector(GateSelector):
                                 dyn_arch, qubit, zone, other_zone
                             )
                             * max_shuttle_weight
-                            * 0.1
+                            * 0.05
                         )
                     weight = max_shuttle_weight - penalty
                     if weight < 1:
                         continue
-                    edges.append((qubit, other_zone + n_qubits))
-                    edge_weights.append(weight)
+                    nets.append([qubit, other_zone + n_qubits])
+                    net_weights.append(weight)
 
         num_vertices = num_spots
         vertex_weights = [1 for _ in range(num_vertices)]
@@ -212,11 +204,11 @@ class GraphPartitionGateSelector(GateSelector):
             + [-1] * (num_vertices - n_qubits - num_zones)
         )
 
-        return GraphData(
+        return HypergraphData(
             num_vertices,
             vertex_weights,
-            edges,
-            edge_weights,
+            nets,
+            net_weights,
             fixed_list,
             places_per_zone,
         )

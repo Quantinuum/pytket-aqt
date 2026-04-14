@@ -41,3 +41,32 @@ class GraphData:
             raise ValueError("len(vertex_weights) must equal n_vertices")
         if len(self.edges) != len(self.edge_weights):
             raise ValueError("len(edge_weights) must equal len(edges)")
+
+
+@dataclass
+class HypergraphData:
+    """Hypergraph data format used to submit qubit-zone graphs to be partitioned"""
+
+    n_vertices: int
+    """Number of vertices"""
+    vertex_weights: list[int]
+    """Vertex weights. One weight per vertex required"""
+    nets: list[list[int]]
+    """Nets between 2 or more vertices"""
+    net_weights: list[int]
+    """Net weights. One weight per net required"""
+    fixed_list: list[int] | None = None
+    """Optional list designating which partition a vertex
+    should be fixed to. If given, one value per vertex is required.
+    The i'th value determines the partition
+    vertex i should be fixed to. A value of -1 means do not fix vertex"""
+    part_max_sizes: list[int] | None = None
+    """Optional list designating the max size of each partition.
+    If given, one value per partition is required.
+    The i'th value determines the max size of partition i"""
+
+    def __post_init__(self) -> None:
+        if len(self.vertex_weights) != self.n_vertices:
+            raise ValueError("len(vertex_weights) must equal n_vertices")
+        if len(self.nets) != len(self.net_weights):
+            raise ValueError("len(net_weights) must equal len(nets)")

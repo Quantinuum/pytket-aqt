@@ -22,6 +22,7 @@ from ..circuit.helpers import TrapConfiguration, ZonePlacement, get_qubit_to_zon
 from ..circuit.multizone_circuit import MultiZoneCircuit
 from ..trap_architecture.architecture import MultiZoneArchitectureSpec
 from ..trap_architecture.dynamic_architecture import DynamicArch
+from .gate_selection.greedy_gate_selection import GreedyGateSelector
 from .routing_config import RoutingConfig
 
 logger = logging.getLogger(__name__)
@@ -69,6 +70,18 @@ def route_circuit(
     while commands:
         target_config = gate_selector.next_config(dynamic_arch, commands)
         # Add operations needed move from the source to target configuration
+
+        old = [set(zone_q) for zone_q in dynamic_arch.trap_configuration.zone_placement]
+        new = [set(zone_q) for zone_q in target_config]
+        if old == new:
+            if isinstance(gate_selector, GreedyGateSelector):
+                raise Exception(
+                    f"Gate selector did not produce new configuration. Routing step: {routing_step}"
+                )
+            logger.warning(
+                "Chosen gate selector did not produce new configuration. Using greedy gate selection for this round"
+            )
+            target_config = GreedyGateSelector().next_config(dynamic_arch, commands)
 
         old_placement = deepcopy(dynamic_arch.trap_configuration.zone_placement)
         routing_result = router.route_source_to_target_config(

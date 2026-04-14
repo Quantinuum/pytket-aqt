@@ -11,11 +11,28 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+from copy import deepcopy
+from dataclasses import dataclass
 from typing import TypeAlias
 
+import numpy as np
 from pytket.circuit import Circuit, Command, OpType, Qubit
 
 DepthList: TypeAlias = list[list[tuple[int, int]]]
+DepthBlocks: TypeAlias = list[list[set[int]]]
+"""
+DepthBlocks provides, at each depth, a list of blocks.
+   Blocks are disjoint sets of qubits that are connected through gates
+   up to the current depth.
+   With increasing depth, the number of blocks can only decrease while their
+   size can only increase.
+"""
+
+
+@dataclass
+class DepthInfo:
+    depth_list: DepthList
+    depth_blocks: DepthBlocks
 
 
 def get_2q_gate_pairs_from_circuit(circuit: Circuit) -> list[tuple[int, int]]:
@@ -45,8 +62,72 @@ def get_2q_gate_pairs_from_commands(commands: list[Command]) -> list[tuple[int, 
     return pair_list
 
 
+def get_depth_info(n_qubits: int, gate_pairs: list[tuple[int, int]]) -> DepthInfo:  # noqa: PLR0912
+    depth_list = get_depth_list(n_qubits, gate_pairs)
+
+    if not depth_list:
+        return DepthInfo([], [])
+
+    depth_blocks: DepthBlocks = []
+    block_assignment = np.array([-1] * n_qubits, dtype=np.int64)
+    unique_pairs_depth_0 = {tuple(sorted(pair)) for pair in depth_list[0]}
+    depth_blocks.append([])
+    for i, pair in enumerate(unique_pairs_depth_0):
+        block_assignment[[pair[0], pair[1]]] = i
+        depth_blocks[0].append(set(pair))
+
+    for depth_layer in depth_list[1:]:
+        current_blocks = deepcopy(depth_blocks[-1])
+
+        def merge_blocks(
+            block0_idx: int, block1_idx: int, current_blocks_loc: list[set[int]]
+        ) -> None:
+            """Merge two blocks into first and clear second"""
+            block1 = current_blocks_loc[block1_idx]
+            current_blocks_loc[block0_idx].update(block1)
+            block_assignment[list(block1)] = block0_idx
+            block1.clear()
+
+        for pair in depth_layer:
+            current_block_q0 = block_assignment[pair[0]]
+            current_block_q1 = block_assignment[pair[1]]
+            match (current_block_q0, current_block_q1):
+                case (-1, -1):
+                    raise Exception("Should have been at lower depth")
+                case (-1, _):
+                    current_blocks[current_block_q1].add(pair[0])
+                    block_assignment[pair[0]] = current_block_q1
+                case (_, -1):
+                    current_blocks[current_block_q0].add(pair[1])
+                    block_assignment[pair[1]] = current_block_q0
+                case (a, b) if a != b:
+                    merge_blocks(current_block_q0, current_block_q1, current_blocks)
+
+        # remove empty blocks
+        n_remove = 0
+        remove_tags: list[int | None] = [None] * len(current_blocks)
+        # tag blocks None -> Remove, int = position shift due to removal
+        for j, block in enumerate(current_blocks):
+            if len(block) == 0:
+                n_remove += 1
+            else:
+                remove_tags[j] = n_remove
+        # shift and remove blocks
+        for j in range(len(current_blocks) - 1, -1, -1):
+            tag = remove_tags[j]
+            if tag == 0:
+                # nothing left to do
+                break
+            if tag is None:
+                current_blocks.pop(j)
+            else:
+                block_assignment[list(current_blocks[j])] = j - tag
+        depth_blocks.append(current_blocks)
+    return DepthInfo(depth_list, depth_blocks)
+
+
 def get_depth_list(n_qubits: int, gate_pairs: list[tuple[int, int]]) -> DepthList:
-    depth_list: list[list[tuple[int, int]]] = []
+    depth_list: DepthList = []
     current_depth_per_qubit: list[int] = [0] * n_qubits
     for pair in gate_pairs:
         qubit0 = pair[0]
@@ -72,60 +153,20 @@ def get_depth_list(n_qubits: int, gate_pairs: list[tuple[int, int]]) -> DepthLis
     return depth_list
 
 
-def get_initial_depth_list(circuit: Circuit) -> DepthList:
+def get_initial_depth_info(circuit: Circuit) -> DepthInfo:
     """From a given Circuit get the Depth list used to determine gate priority.
 
     Used for the initial placement of ions based on partitioning algorithms
     """
     n_qubits = circuit.n_qubits
     gate_pairs = get_2q_gate_pairs_from_circuit(circuit)
-    return get_depth_list(n_qubits, gate_pairs)
+    return get_depth_info(n_qubits, gate_pairs)
 
 
-def depth_list_from_command_list(n_qubits: int, commands: list[Command]) -> DepthList:
+def depth_info_from_command_list(n_qubits: int, commands: list[Command]) -> DepthInfo:
     """From a given list of Circuit Commands get the Depth list used to determine gate priority.
 
     Used for the initial placement of ions based on partitioning algorithms
     """
     gate_pairs = get_2q_gate_pairs_from_commands(commands)
-    return get_depth_list(n_qubits, gate_pairs)
-
-
-def get_updated_depth_list(
-    n_qubits: int,
-    qubit_to_zone: list[int],
-    gate_zones: list[int],
-    depth_list: DepthList,
-) -> DepthList:
-    """From a given placement of qubits in zones
-     update the DepthList used to determine gate priority.
-
-    Used for graph partitioning routing.
-    """
-    pruned_depth_list = [depth.copy() for depth in depth_list]
-    # prune current depth list
-    prune_stage = False
-    prune_touched = set()
-    for i, depth in enumerate(depth_list):
-        for qubit_pair in depth:
-            zone_0 = qubit_to_zone[qubit_pair[0]]
-            zone_1 = qubit_to_zone[qubit_pair[1]]
-            if zone_0 == zone_1 and zone_0 in gate_zones:
-                if not prune_stage or (
-                    qubit_pair[0] not in prune_touched
-                    and qubit_pair[1] not in prune_touched
-                ):
-                    pruned_depth_list[i].remove(qubit_pair)
-                else:
-                    prune_touched.update({qubit_pair[0], qubit_pair[1]})
-            else:
-                prune_touched.update({qubit_pair[0], qubit_pair[1]})
-        if pruned_depth_list[i]:
-            prune_stage = True
-        if len(prune_touched) >= n_qubits - 1:
-            break
-    # flatten depth list
-    flattened_depth_list = [pair for depth in pruned_depth_list for pair in depth]
-    # new depth list
-    new_depth_list = get_depth_list(n_qubits, flattened_depth_list)
-    return new_depth_list  # noqa: RET504
+    return get_depth_info(n_qubits, gate_pairs)

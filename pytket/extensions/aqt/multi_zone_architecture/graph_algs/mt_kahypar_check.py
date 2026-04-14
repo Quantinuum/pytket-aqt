@@ -11,9 +11,9 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
-import importlib
+import importlib.util
 
-MT_KAHYPAR_INSTALLED = importlib.util.find_spec("mtkahypar") is not None  # type: ignore
+MT_KAHYPAR_INSTALLED = importlib.util.find_spec("mtkahypar") is not None
 """Whether or not the mtkahypar package is available"""
 
 
