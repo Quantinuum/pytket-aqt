@@ -46,13 +46,14 @@ class DynamicArch:
             [arch.get_zone_max_ions_transport(zone) for zone in range(arch.n_zones)]
         )
         self.zone_swap_costs = np.array([zone.swap_cost for zone in arch.zones])
+        self._port_graph = MultiZonePortGraph(arch, configuration)
+        self._is_linear_architecture = self._port_graph.is_linear_architecture()
 
         # dynamic (changes with qubit movement
         self._current_config = deepcopy(configuration)
         self.qubit_to_zone_pos = get_qubit_to_zone_pos(
             configuration.n_qubits, configuration.zone_placement
         )
-        self._port_graph = MultiZonePortGraph(arch, configuration)
         self.zone_occupancy = np.array(
             [len(zone) for zone in self._current_config.zone_placement], dtype=np.int64
         )
@@ -107,6 +108,10 @@ class DynamicArch:
     @property
     def has_memory_zones(self) -> bool:
         return self._macro_arch.has_memory_zones
+
+    @property
+    def is_linear_architecture(self) -> bool:
+        return self._is_linear_architecture
 
     @property
     def gate_zones(self) -> list[int]:

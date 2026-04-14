@@ -15,6 +15,8 @@ from collections.abc import Callable
 
 from networkx import (
     Graph,
+    is_connected,
+    is_tree,
     single_source_dijkstra,
 )
 from networkx.exception import NetworkXNoPath
@@ -106,6 +108,30 @@ class MultiZonePortGraph:
             tuple[int, int, int, int],
             tuple[list[int], int, int] | tuple[None, None, None],
         ] = {}
+
+    def is_linear_architecture(self) -> bool:
+        """Return whether the architecture forms a single non-branching line.
+
+        In the port-graph representation this means the graph is a connected path:
+        it is connected, acyclic, has exactly two degree-1 endpoint nodes, and every
+        other port node has degree 2.
+        """
+        if self.port_graph.number_of_nodes() == 0:
+            return False
+        if not is_connected(self.port_graph):
+            return False
+        if not is_tree(self.port_graph):
+            return False
+
+        degrees = [degree for _, degree in self.port_graph.degree()]
+        edge_degree = 1
+        interior_degree = 2
+        n_endpoints = sum(degree == edge_degree for degree in degrees)
+        n_interior = sum(degree == interior_degree for degree in degrees)
+        expected_n_endpoints = 2
+        return n_endpoints == expected_n_endpoints and n_endpoints + n_interior == len(
+            degrees
+        )
 
     def update_zone_occupancy_weight(self, zone: int, zone_occupancy: int) -> None:
         edge_dict = self.port_graph.edges[
