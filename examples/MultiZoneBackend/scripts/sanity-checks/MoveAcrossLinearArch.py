@@ -1,10 +1,18 @@
+import logging
+
+from numpy import ceil, log2, pi
 from pytket.circuit.display import Any
+
 from pytket import Circuit
-from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend, get_aqt_json_syntax_for_compiled_circuit
-
-from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import MultiZoneArchitectureSpec, \
-    PortId, PortSpec, Zone, ZoneConnection
-
+from pytket.extensions.aqt.backends.aqt_multi_zone import (
+    AQTMultiZoneBackend,
+    get_aqt_json_syntax_for_compiled_circuit,
+)
+from pytket.extensions.aqt.logger import configure_logging
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+    GraphPartitionGateSelector,
+    HypergraphPartitionGateSelector,
+)
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_config import (
     RoutingConfig,
 )
@@ -19,18 +27,15 @@ from pytket.extensions.aqt.multi_zone_architecture.initial_placement.settings im
     InitialPlacementAlg,
     InitialPlacementSettings,
 )
-from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
-    GraphPartitionGateSelector,
-    HypergraphPartitionGateSelector
+from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
+    MultiZoneArchitectureSpec,
+    PortId,
+    PortSpec,
+    Zone,
+    ZoneConnection,
 )
-import logging
-from pytket.extensions.aqt.logger import configure_logging
 
-
-configure_logging(level = logging.DEBUG)
-
-import time
-from numpy import pi, ceil, log2
+configure_logging(level=logging.DEBUG)
 
 
 def create_ghz_sequential(num_qubits: int) -> Circuit:
@@ -57,7 +62,7 @@ def create_ghz_nested(num_qubits: int) -> Circuit:
     circuit.H(0)
     l = int(ceil(log2(num_qubits)))
     for m in range(l, 0, -1):
-        for k in range(0, num_qubits, 2 ** m):
+        for k in range(0, num_qubits, 2**m):
             if k + 2 ** (m - 1) >= num_qubits:
                 continue
             circuit.CX(k, k + 2 ** (m - 1))
@@ -72,36 +77,32 @@ order_init = InitialPlacementSettings(
 )
 
 compilation_settings: dict[str, CompilationSettings] = {
-    "graph":
-        CompilationSettings(
-            pytket_optimisation_level=1,
-            initial_placement=order_init,
-            routing=RoutingConfig(gate_selector=GraphPartitionGateSelector())
-        ),
-    "hypergraph":
-        CompilationSettings(
-            pytket_optimisation_level=1,
-            initial_placement=order_init,
-            routing=RoutingConfig(gate_selector=HypergraphPartitionGateSelector()),
-        ),
-    "greedy":
-        CompilationSettings(
-            pytket_optimisation_level=1,
-            initial_placement=order_init,
-            routing=RoutingConfig(),
-        ),
-    "legacy":
-        CompilationSettings(
-            pytket_optimisation_level=1,
-            initial_placement=order_init,
-            routing=RoutingConfig(use_legacy_greedy_method=True),
-        ),
+    "graph": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(gate_selector=GraphPartitionGateSelector()),
+    ),
+    "hypergraph": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(gate_selector=HypergraphPartitionGateSelector()),
+    ),
+    "greedy": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(),
+    ),
+    "legacy": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(use_legacy_greedy_method=True),
+    ),
 }
 
 
-def transpile(backend: AQTMultiZoneBackend,
-              circuit: Circuit,
-              settings: CompilationSettings) -> tuple[Circuit, list[list[Any]]]:
+def transpile(
+    backend: AQTMultiZoneBackend, circuit: Circuit, settings: CompilationSettings
+) -> tuple[Circuit, list[list[Any]]]:
     precompiled_circuit = backend.precompile_circuit(circuit, settings)
     routed_circuit = backend.route_precompiled(precompiled_circuit, settings)
     transpiled_circuit = get_aqt_json_syntax_for_compiled_circuit(routed_circuit)
@@ -109,7 +110,9 @@ def transpile(backend: AQTMultiZoneBackend,
     return (precompiled_circuit, transpiled_circuit)
 
 
-def print_transpiled(transpiled_circuit: list[list[Any]], title="Transpiled Circuit:") -> None:
+def print_transpiled(
+    transpiled_circuit: list[list[Any]], title="Transpiled Circuit:"
+) -> None:
     print("----")
     print(f"{title}:")
     for op in transpiled_circuit:
@@ -172,21 +175,16 @@ custom_spec = MultiZoneArchitectureSpec(
 
 
 def main() -> None:
-    line_backend = AQTMultiZoneBackend(
-        architecture=custom_spec, access_token="invalid"
-    )
+    line_backend = AQTMultiZoneBackend(architecture=custom_spec, access_token="invalid")
 
     # This can be used to configure the number of threads used and random seed
     # for mt-kahypar. It is not required (then default will be used) and can only
     # be set once
-    configure_mtkahypar(
-        MtKahyparConfig(
-            n_threads=1,
-            random_seed=243
-        )
-    )
+    configure_mtkahypar(MtKahyparConfig(n_threads=1, random_seed=243))
     circuit = create_ghz_sequential(12)
-    precompiled_circuit = line_backend.compile_circuit(circuit, compilation_settings["graph"])
+    precompiled_circuit = line_backend.compile_circuit(
+        circuit, compilation_settings["graph"]
+    )
     for name, comp_settings in compilation_settings.items():
         print("----")
         print(f"Performing {name} routing")
@@ -195,8 +193,7 @@ def main() -> None:
         print_transpiled(transpiled_circuit, "Circuit")
         count_ops(transpiled_circuit, "Sequential GHZ")
         print("----")
-        print("")
-
+        print()
 
 
 if __name__ == "__main__":

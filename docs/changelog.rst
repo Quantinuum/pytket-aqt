@@ -14,6 +14,7 @@ unreleased
 
 * Updated pytket version requirement to 2.11.
 
+
 0.38.0 (November 2025)
 ----------------------
 
