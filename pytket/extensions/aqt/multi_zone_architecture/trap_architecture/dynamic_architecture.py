@@ -22,6 +22,7 @@ from ..circuit.helpers import TrapConfiguration, get_qubit_to_zone_pos
 from .architecture import MultiZoneArchitectureSpec
 from .architecture_portgraph import MultiZonePortGraph
 from .macro_architecture_graph import MultiZoneArch
+from .pebble_hole_graph import PebbleHoleGraph
 
 
 class DynamicArch:
@@ -105,6 +106,10 @@ class DynamicArch:
         return self._current_config.n_qubits
 
     @property
+    def architecture_spec(self) -> MultiZoneArchitectureSpec:
+        return self._arch
+
+    @property
     def has_memory_zones(self) -> bool:
         return self._macro_arch.has_memory_zones
 
@@ -163,3 +168,6 @@ class DynamicArch:
         self, starting_zone: int
     ) -> Generator[list[int], None, None]:
         return bfs_layers(self._macro_arch.zone_graph, starting_zone)
+
+    def pebble_hole_graph(self) -> PebbleHoleGraph:
+        return PebbleHoleGraph(self._arch, self._current_config)
