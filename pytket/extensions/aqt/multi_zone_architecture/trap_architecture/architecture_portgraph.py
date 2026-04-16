@@ -119,6 +119,15 @@ class MultiZonePortGraph:
         edge_dict["transport_cost"] = zone_occupancy * self.swap_costs[zone]
         self._path_cache.clear()
 
+    def shuttle_edge_transport_cost(
+        self, src_zone: int, src_port: int, trg_zone: int, trg_port: int
+    ) -> int:
+        edge_dict = self.port_graph.edges[
+            zone_port_to_port_id(src_zone, src_port),
+            zone_port_to_port_id(trg_zone, trg_port),
+        ]
+        return int(edge_dict["transport_cost"])
+
     def shortest_port_to_port_path_length(
         self,
         start_zone: int,

@@ -91,6 +91,10 @@ class DynamicArch:
         port1, port2 = self._macro_arch.get_connected_ports(zone1, zone2)
         return port1.value, port2.value
 
+    def shuttle_edge_transport_cost(self, zone1: int, zone2: int) -> int:
+        port1, port2 = self.connection_ports(zone1, zone2)
+        return self._port_graph.shuttle_edge_transport_cost(zone1, port1, zone2, port2)
+
     def connected_zones(self, zone: int) -> Iterable[int]:
         return self._macro_arch.connected_zones(zone)
 
