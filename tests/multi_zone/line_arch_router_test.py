@@ -21,11 +21,14 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing
     LineArchRouter,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing.line_arch_router import (
+    analyze_swap_free_routing,
+    execute_adjacent_swap_in_workspace,
     execute_swap_free_segmentation,
     swap_free_routing_segmentation,
     target_zone_interval_qubits,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_ops import (
+    PSwap,
     RoutingBarrier,
     Shuttle,
 )
@@ -256,6 +259,39 @@ def test_swap_free_routing_segmentation_returns_none_when_swaps_are_required() -
     assert segmentation is None
 
 
+def test_analyze_swap_free_routing_reports_inversion_failure_witness() -> None:
+    dyn_arch = DynamicArch(
+        _line_architecture([3, 3]),
+        _configuration([[0, 1], [2, 3]]),
+    )
+
+    analysis = analyze_swap_free_routing(dyn_arch, [[1], [0]])
+
+    assert analysis.segmentation is None
+    assert analysis.failure_witness is not None
+    assert analysis.failure_witness.kind == "inversion"
+    assert analysis.failure_witness.left_qubit == 0
+    assert analysis.failure_witness.right_qubit == 1
+    assert analysis.failure_witness.left_zone == 1
+    assert analysis.failure_witness.right_zone == 0
+
+
+def test_analyze_swap_free_routing_reports_boundary_failure_witness() -> None:
+    dyn_arch = DynamicArch(
+        _line_architecture([3, 3]),
+        _configuration([[0, 1, 2], [3]]),
+    )
+
+    analysis = analyze_swap_free_routing(dyn_arch, [[], [0, 1]])
+
+    assert analysis.segmentation is None
+    assert analysis.failure_witness is not None
+    assert analysis.failure_witness.kind == "boundary"
+    assert analysis.failure_witness.boundary_index == 0
+    assert analysis.failure_witness.min_prefix_size == 1
+    assert analysis.failure_witness.max_prefix_size == 0
+
+
 def test_execute_swap_free_segmentation_returns_shuttles_and_updates_dynamic_arch() -> (
     None
 ):
@@ -275,13 +311,67 @@ def test_execute_swap_free_segmentation_returns_shuttles_and_updates_dynamic_arc
     assert result.routing_ops == [
         RoutingBarrier(),
         Shuttle([3], 1, 2, PortId.p1, PortId.p0),
+        RoutingBarrier(),
         Shuttle([0, 1], 0, 1, PortId.p1, PortId.p0),
         RoutingBarrier(),
     ]
     assert dyn_arch.trap_configuration.zone_placement == [[], [0, 1, 2], [3, 4]]
 
 
-def test_line_arch_router_raises_for_target_placements_that_require_swaps() -> None:
+def test_execute_adjacent_swap_in_workspace_isolates_pair_and_swaps_them() -> None:
+    dyn_arch = DynamicArch(
+        _line_architecture([3, 3, 3]),
+        _configuration([[0, 1], [2, 3], [4]]),
+    )
+
+    result = execute_adjacent_swap_in_workspace(dyn_arch, 1, 2, workspace_zone=1)
+
+    assert result.cost_estimate == 3
+    assert result.routing_ops == [
+        RoutingBarrier(),
+        Shuttle([3], 1, 2, PortId.p1, PortId.p0),
+        RoutingBarrier(),
+        Shuttle([1], 0, 1, PortId.p1, PortId.p0),
+        RoutingBarrier(),
+        PSwap(1, 1, 2),
+        RoutingBarrier(),
+    ]
+    assert dyn_arch.trap_configuration.zone_placement == [[0], [2, 1], [3, 4]]
+
+
+def test_execute_adjacent_swap_in_workspace_requires_adjacent_qubits() -> None:
+    dyn_arch = DynamicArch(
+        _line_architecture([3, 3, 3]),
+        _configuration([[0, 1], [2, 3], [4]]),
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=r"Workspace swaps require adjacent qubits in the global order\.",
+    ):
+        execute_adjacent_swap_in_workspace(dyn_arch, 0, 2, workspace_zone=1)
+
+
+def test_line_arch_router_repairs_simple_inversion_with_greedy_workspace_swap() -> None:
+    dyn_arch = DynamicArch(
+        _line_architecture([3, 3]),
+        _configuration([[0, 1], [2]]),
+    )
+
+    result = LineArchRouter().route_source_to_target_config(dyn_arch, [[1], [0]])
+
+    assert result.cost_estimate == 2
+    assert result.routing_ops == [
+        RoutingBarrier(),
+        PSwap(0, 0, 1),
+        RoutingBarrier(),
+        Shuttle([0], 0, 1, PortId.p1, PortId.p0),
+        RoutingBarrier(),
+    ]
+    assert dyn_arch.trap_configuration.zone_placement == [[1], [0, 2]]
+
+
+def test_line_arch_router_raises_when_no_legal_workspace_swap_exists() -> None:
     dyn_arch = DynamicArch(
         _line_architecture([3, 3]),
         _configuration([[0, 1, 2], [3]]),
@@ -289,9 +379,24 @@ def test_line_arch_router_raises_for_target_placements_that_require_swaps() -> N
 
     with pytest.raises(
         ValueError,
-        match=r"LineArchRouter does not yet support target placements that require swaps\.",
+        match=(
+            r"LineArchRouter could not find a legal adjacent workspace swap "
+            r"to repair the target placement\."
+        ),
     ):
         LineArchRouter().route_source_to_target_config(dyn_arch, [[], [0, 1]])
+
+
+def test_line_arch_routing_possible_but_fails() -> None:
+    dyn_arch = DynamicArch(
+        _line_architecture([3, 2, 3]),
+        _configuration([[0, 1, 2], [4], [3]]),
+    )
+    result = LineArchRouter().route_source_to_target_config(dyn_arch, [[3], [], [0, 1]])
+
+    assert result.cost_estimate > 0
+    assert 3 in dyn_arch.trap_configuration.zone_placement[0]
+    assert {0, 1}.issubset(dyn_arch.trap_configuration.zone_placement[2])
 
 
 def test_line_arch_router_fails_for_non_linear_architecture() -> None:

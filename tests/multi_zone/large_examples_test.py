@@ -4,6 +4,12 @@ import pytest
 
 from pytket import Circuit
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+    GreedyGateSelector,
+)
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
+    SingleGateZoneLineArchRouter,
+)
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_config import (
     RoutingConfig,
 )
@@ -21,6 +27,7 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_archi
     gate_zone_type_examples,
     grid12,
     grid12_mod,
+    linear_8_zones,
     racetrack,
     racetrack_4_gatezones,
 )
@@ -95,9 +102,18 @@ gate_zones_types_backend = AQTMultiZoneBackend(
     architecture=gate_zone_type_examples, access_token="invalid"
 )
 
+linear_8_zones_backend = AQTMultiZoneBackend(
+    architecture=linear_8_zones, access_token="invalid"
+)
+
 order_init = InitialPlacementSettings(
     algorithm=InitialPlacementAlg.qubit_order,
     zone_free_space=2,
+    max_depth=200,
+)
+line_order_init = InitialPlacementSettings(
+    algorithm=InitialPlacementAlg.qubit_order,
+    zone_free_space=1,
     max_depth=200,
 )
 greedy_routing = RoutingConfig()
@@ -135,10 +151,24 @@ legacy_compilation_settings = CompilationSettings(
     initial_placement=order_init,
     routing=legacy_routing,
 )
+line_arch_compilation_settings = CompilationSettings(
+    pytket_optimisation_level=1,
+    initial_placement=line_order_init,
+    routing=RoutingConfig(
+        router=SingleGateZoneLineArchRouter(),
+        gate_selector=GreedyGateSelector(only_place_gate_qubits=True),
+    ),
+)
 
 
-adv_precomp = racetrack_backend.compile_circuit(
-    advantage_circuit_56, graph_compilation_settings
+# The pre-compilation stage only depends on the pytket optimisation level, which is
+# shared across the routing configurations exercised below. Compile each source
+# circuit once and reuse it across the backend-specific routing tests.
+advantage_circuit_56_precomp = racetrack_backend.compile_circuit(
+    advantage_circuit_56, greedy_compilation_settings
+)
+advantage_circuit_30_precomp = racetrack_backend.compile_circuit(
+    advantage_circuit_30, greedy_compilation_settings
 )
 
 
@@ -160,12 +190,7 @@ adv_precomp = racetrack_backend.compile_circuit(
 def test_quantum_advantage_racetrack_all_gate_zone(
     compilation_settings: CompilationSettings,
 ) -> None:
-    racetrack_backend.route_compiled(adv_precomp, compilation_settings)
-
-
-adv_precomp2 = racetrack_4_gatezones_backend.compile_circuit(
-    advantage_circuit_56, graph_compilation_settings
-)
+    racetrack_backend.route_compiled(advantage_circuit_56_precomp, compilation_settings)
 
 
 @pytest.mark.parametrize(
@@ -187,14 +212,9 @@ def test_quantum_advantage_racetrack_4_gate_zone(
     compilation_settings: CompilationSettings,
 ) -> None:
     racetrack_4_gatezones_backend.route_compiled(
-        adv_precomp2,
+        advantage_circuit_56_precomp,
         compilation_settings,
     )
-
-
-adv_precomp3 = grid_backend.compile_circuit(
-    advantage_circuit_30, graph_compilation_settings
-)
 
 
 @pytest.mark.parametrize(
@@ -216,14 +236,9 @@ def test_quantum_advantage_grid_12_gate_zone(
     compilation_settings: CompilationSettings,
 ) -> None:
     grid_backend.route_compiled(
-        adv_precomp3,
+        advantage_circuit_30_precomp,
         compilation_settings,
     )
-
-
-adv_precomp4 = grid_mod_backend.compile_circuit(
-    advantage_circuit_30, graph_compilation_settings
-)
 
 
 @pytest.mark.parametrize(
@@ -245,14 +260,9 @@ def test_quantum_advantage_grid_4_gate_zone(
     compilation_settings: CompilationSettings,
 ) -> None:
     grid_mod_backend.route_compiled(
-        adv_precomp4,
+        advantage_circuit_30_precomp,
         compilation_settings,
     )
-
-
-adv_precomp5 = gate_zones_types_backend.compile_circuit(
-    advantage_circuit_30, graph_compilation_settings
-)
 
 
 @pytest.mark.parametrize(
@@ -274,6 +284,17 @@ def test_quantum_advantage_gate_zone_types_backend(
     compilation_settings: CompilationSettings,
 ) -> None:
     gate_zones_types_backend.route_compiled(
-        adv_precomp5,
+        advantage_circuit_30_precomp,
         compilation_settings,
     )
+
+
+@skip_if_no_run_long_tests
+def test_quantum_advantage_linear_8_zones_line_arch_router() -> None:
+    print("Testing linear_8_zones_backend")
+    routed = linear_8_zones_backend.route_compiled(
+        advantage_circuit_30_precomp,
+        line_arch_compilation_settings,
+    )
+    assert routed.get_n_shuttles() == 69838
+    assert routed.get_n_pswaps() == 13052

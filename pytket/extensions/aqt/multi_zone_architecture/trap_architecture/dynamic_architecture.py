@@ -24,6 +24,8 @@ from .architecture_portgraph import MultiZonePortGraph
 from .macro_architecture_graph import MultiZoneArch
 from .pebble_hole_graph import PebbleHoleGraph
 
+_ALLOWED_SWAP_SIZE = 2
+
 
 class DynamicArch:
     """Dynamic Architecture class
@@ -163,6 +165,31 @@ class DynamicArch:
         self.zone_occupancy[src_zone] -= n_move
         self.zone_occupancy[trg_zone] += n_move
         # update transport_free_space
+        self.transport_free_space = self.zone_max_transport_cap - self.zone_occupancy
+
+    def swap_qubits_in_zone(self, zone: int, qubit0: int, qubit1: int) -> None:
+        zone_qubits = self._current_config.zone_placement[zone]
+        if len(zone_qubits) != _ALLOWED_SWAP_SIZE or set(zone_qubits) != {
+            qubit0,
+            qubit1,
+        }:
+            raise ValueError(
+                "Zone swaps are only supported when the zone contains exactly the two qubits to be swapped."
+            )
+        zone_qubits.reverse()
+        self.qubit_to_zone_pos = get_qubit_to_zone_pos(
+            self._current_config.n_qubits, self._current_config.zone_placement
+        )
+
+    def copy_dynamic_state_from(self, other: "DynamicArch") -> None:
+        self._current_config = deepcopy(other.trap_configuration)
+        self._port_graph = MultiZonePortGraph(self._arch, self._current_config)
+        self.qubit_to_zone_pos = get_qubit_to_zone_pos(
+            self._current_config.n_qubits, self._current_config.zone_placement
+        )
+        self.zone_occupancy = np.array(
+            [len(zone) for zone in self._current_config.zone_placement], dtype=np.int64
+        )
         self.transport_free_space = self.zone_max_transport_cap - self.zone_occupancy
 
     def is_gate_zone(self, zone: int) -> bool:
