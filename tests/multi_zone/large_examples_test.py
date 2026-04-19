@@ -4,6 +4,9 @@ import pytest
 
 from pytket import Circuit
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
+from pytket.extensions.aqt.multi_zone_architecture.circuit import (
+    write_multi_zone_circuit_movie_html,
+)
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
     GreedyGateSelector,
 )
@@ -290,11 +293,22 @@ def test_quantum_advantage_gate_zone_types_backend(
 
 
 @skip_if_no_run_long_tests
-def test_quantum_advantage_linear_8_zones_line_arch_router() -> None:
+def test_quantum_advantage_linear_8_zones_line_arch_router(tmp_path) -> None:
     print("Testing linear_8_zones_backend")
     routed = linear_8_zones_backend.route_compiled(
         advantage_circuit_30_precomp,
         line_arch_compilation_settings,
     )
+    movie_path = tmp_path / "linear_8_zones_quantum_advantage_movie.html"
+    written_path = write_multi_zone_circuit_movie_html(
+        routed,
+        movie_path,
+        title="Linear 8 Zones Quantum Advantage Routing",
+    )
     assert routed.get_n_shuttles() == 69838
     assert routed.get_n_pswaps() == 13052
+    assert written_path == movie_path
+    assert movie_path.exists()
+    assert "Linear 8 Zones Quantum Advantage Routing" in movie_path.read_text(
+        encoding="utf-8"
+    )
