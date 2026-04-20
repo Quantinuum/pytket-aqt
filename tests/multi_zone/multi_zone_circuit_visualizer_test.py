@@ -26,6 +26,9 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit import (
     write_multi_zone_circuit_movie_html,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit.multizone_circuit_visualizer import (
+    _best_non_linear_zone_orientations,
+    _enforce_minimum_zone_border_distance,
+    _raw_port_positions,
     _slot_centers,
     _SlotLayout,
     _zone_layout,
@@ -54,6 +57,9 @@ from pytket.extensions.aqt.multi_zone_architecture.initial_placement.settings im
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
     MultiZoneArchitectureSpec,
     PortId,
+    PortSpec,
+    Zone,
+    ZoneConnection,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     four_zones_in_a_line,
@@ -76,6 +82,25 @@ def _compiled_visualizer_circuit() -> MultiZoneCircuit:
         ]
     )
     circuit.add_gate(OpType.XXPhase, [1, 2], [0.5])
+    circuit.is_compiled = True
+    circuit.validate()
+    return circuit
+
+
+def _compiled_visualizer_multi_gate_circuit() -> MultiZoneCircuit:
+    circuit = MultiZoneCircuit(four_zones_in_a_line, {1: [0, 1], 2: [2]}, 3)
+    circuit.add_gate(OpType.Rx, [0], [0.25])
+    circuit.add_gate(OpType.XXPhase, [0, 1], [0.5])
+    circuit.add_gate(OpType.Ry, [2], [0.75])
+    circuit.add_routing_ops(
+        [
+            RoutingBarrier(),
+            Shuttle([1], 1, 2, PortId.p1, PortId.p0),
+            RoutingBarrier(),
+        ]
+    )
+    circuit.add_gate(OpType.Rz, [0], [0.125])
+    circuit.add_gate(OpType.XXPhase, [1, 2], [0.25])
     circuit.is_compiled = True
     circuit.validate()
     return circuit
@@ -117,9 +142,51 @@ def _routed_non_linear_visualizer_circuit(
             gate_selector=GreedyGateSelector(),
         ),
     )
-    qft_circuit = build_test_circuit(15)
+    qft_circuit = build_test_circuit(30)
     compiled = backend.compile_circuit(qft_circuit, compilation_settings)
     return backend.route_compiled(compiled, compilation_settings)
+
+
+def _branching_orientation_test_circuit() -> MultiZoneCircuit:
+    architecture = MultiZoneArchitectureSpec(
+        n_qubits_max=0,
+        n_zones=3,
+        zones=[Zone(max_ions_gate_op=2) for _ in range(3)],
+        connections=[
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p0),
+                zone_port_spec1=PortSpec(zone_id=1, port_id=PortId.p1),
+            ),
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p1),
+                zone_port_spec1=PortSpec(zone_id=2, port_id=PortId.p0),
+            ),
+        ],
+    )
+    return MultiZoneCircuit(architecture, {}, 0)
+
+
+def _branched_port_layout_test_circuit() -> MultiZoneCircuit:
+    architecture = MultiZoneArchitectureSpec(
+        n_qubits_max=0,
+        n_zones=4,
+        zones=[Zone(max_ions_gate_op=2) for _ in range(4)],
+        connections=[
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p0),
+                zone_port_spec1=PortSpec(zone_id=1, port_id=PortId.p1),
+            ),
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p1),
+                zone_port_spec1=PortSpec(zone_id=2, port_id=PortId.p0),
+            ),
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p1),
+                zone_port_spec1=PortSpec(zone_id=3, port_id=PortId.p0),
+            ),
+        ],
+    )
+    return MultiZoneCircuit(architecture, {}, 0)
 
 
 def test_build_multi_zone_circuit_movie_frames_tracks_shuttles_swaps_and_gates() -> (
@@ -145,8 +212,47 @@ def test_build_multi_zone_circuit_movie_frames_tracks_shuttles_swaps_and_gates()
     pswap_frame = next(frame for frame in frames if frame.kind == "pswap")
     assert pswap_frame.zone_placement == [[0], [2, 1], [], []]
     gate_frame = next(frame for frame in frames if frame.kind == "gate")
+    assert gate_frame.command_text == "QOPS 1-2;"
     assert gate_frame.highlight_qubits == [1, 2]
     assert gate_frame.zone_placement == [[0], [2, 1], [], []]
+
+
+def test_build_multi_zone_circuit_movie_frames_condenses_contiguous_gate_blocks() -> (
+    None
+):
+    circuit = _compiled_visualizer_multi_gate_circuit()
+
+    frames = build_multi_zone_circuit_movie_frames(circuit)
+
+    assert [frame.kind for frame in frames] == ["initial", "gate", "shuttle", "gate"]
+    assert frames[1].command_text == "QOPS 0-2;"
+    assert frames[1].highlight_qubits == [0, 1, 2]
+    assert frames[2].kind == "shuttle"
+    assert frames[3].command_text == "QOPS 0-2;"
+    assert frames[3].highlight_qubits == [0, 1, 2]
+
+
+def test_build_multi_zone_circuit_movie_frames_can_keep_individual_gate_frames() -> (
+    None
+):
+    circuit = _compiled_visualizer_multi_gate_circuit()
+
+    frames = build_multi_zone_circuit_movie_frames(circuit, condense_quantum_ops=False)
+
+    assert [frame.kind for frame in frames] == [
+        "initial",
+        "gate",
+        "gate",
+        "gate",
+        "shuttle",
+        "gate",
+        "gate",
+    ]
+    assert frames[1].command_text.startswith("Rx(")
+    assert frames[2].command_text.startswith("Ry(")
+    assert frames[3].command_text.startswith("XXPhase(")
+    assert frames[5].command_text.startswith("Rz(")
+    assert frames[6].command_text.startswith("XXPhase(")
 
 
 def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -> None:
@@ -158,9 +264,13 @@ def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -
     assert "Visualizer Test" in html
     assert "movieData" in html
     assert "Initial placement" in html
+    assert "QOPS 1-2;" in html
     assert '"n_qubits": 3' in html
     assert "textContent = String(qubit);" in html
     assert 'return "#3a86ff";' in html
+    assert 'const operationsList = document.getElementById("operations-list");' in html
+    assert "const currentOperationRow = 10;" in html
+    assert "const visibleOperationRows = 16;" in html
     assert "let isPlaying = false;" in html
     assert '<button id="play-pause" type="button">Play</button>' in html
     assert (
@@ -175,7 +285,45 @@ def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -
     assert "return movieData.frame_duration_ms;" in html
     assert 'frameDurationInput.addEventListener("change", () => {' in html
     assert "if (frameIndex >= movieData.frames.length - 1)" in html
+    assert 'playPause.textContent = "Restart";' in html
+    assert "if (!isPlaying && frameIndex >= movieData.frames.length - 1)" in html
+    assert "frameIndex = 0;" in html
+    assert "renderFrame(frameIndex, false);" in html
     assert "renderFrame(frameIndex);\n  </script>" in html
+
+
+def test_generate_multi_zone_circuit_movie_html_can_disable_quantum_op_condensing() -> (
+    None
+):
+    circuit = _compiled_visualizer_multi_gate_circuit()
+
+    html = generate_multi_zone_circuit_movie_html(
+        circuit,
+        title="Uncondensed Visualizer Test",
+        condense_quantum_ops=False,
+    )
+
+    assert "QOPS 0-2;" not in html
+    assert "Rx(0.25) q[0];" in html
+    assert "XXPhase(0.5) q[0], q[1];" in html
+    assert "Ry(0.75) q[2];" in html
+
+
+def test_generate_multi_zone_circuit_movie_html_contains_operation_stream_hooks() -> (
+    None
+):
+    circuit = _compiled_visualizer_circuit()
+
+    html = generate_multi_zone_circuit_movie_html(circuit, title="Visualizer Test")
+
+    assert ".operations-panel {" in html
+    assert ".operation-row.movement {" in html
+    assert ".operation-row.current {" in html
+    assert "function renderOperationStream(index)" in html
+    assert 'row.className = "operation-row";' in html
+    assert 'row.classList.add("movement");' in html
+    assert 'row.classList.add("current");' in html
+    assert "row.textContent = frameData.command_text;" in html
 
 
 def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_motion_hooks() -> (
@@ -189,6 +337,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert 'frame.kind === "gate" ? frame.highlight_qubits : []' in html
     assert "function edgeAnchor(zone, port)" in html
     assert "function animateShuttle(frame, previousFrame, positions)" in html
+    assert "function animatePswap(frame, previousFrame, positions)" in html
     assert (
         "const sourceAnchor = edgeAnchor(sourceZone, frame.shuttle.source_port);"
         in html
@@ -205,6 +354,15 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert "sourceAnchor.y - chainOffsetY" in html
     assert "targetAnchor.x + chainOffsetX" in html
     assert "targetAnchor.y + chainOffsetY" in html
+    assert "const angle = progress * Math.PI;" in html
+    assert (
+        "const x = path.centerX + (path.relX * cosAngle) - (path.relY * sinAngle);"
+        in html
+    )
+    assert (
+        "const y = path.centerY + (path.relX * sinAngle) + (path.relY * cosAngle);"
+        in html
+    )
     assert "x: port === 0 ? zone.x : zone.x + zone.width" in html
     assert "function translateZone(zone, dx, dy)" in html
     assert "function applyZoneOrientation(zone)" in html
@@ -232,6 +390,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert "--gate-zone-fill: #f3c2c2;" in html
     assert "--gate-zone-stroke: #ba5c5c;" in html
     assert "label.textContent = `Z${zone.id}`;" in html
+    assert '} else if (animate && frame.kind === "pswap") {' in html
     assert (
         "Movie of a routed multi-zone circuit with gate highlights and physical motion."
         not in html
@@ -241,6 +400,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert " | memory" not in html
     assert " | gate" not in html
     assert "Zone ${zone.id}" not in html
+    assert "color: var(--highlight);" not in html
 
 
 def test_write_multi_zone_circuit_movie_html_writes_file(tmp_path: Path) -> None:
@@ -314,6 +474,76 @@ def test_zone_layout_wraps_linear_architecture_without_overlap() -> None:
             assert not (overlaps_horizontally and overlaps_vertically)
     assert len({zone["y"] for zone in zones}) > 1
     assert all(zone["height"] == 52 for zone in zones)
+
+
+@pytest.mark.parametrize(
+    ("centers", "expected_orientation"),
+    [
+        pytest.param(
+            {0: (0.0, 0.0), 1: (0.0, 10.0), 2: (0.0, -10.0)},
+            1,
+            id="vertical-facing",
+        ),
+        pytest.param(
+            {0: (0.0, 0.0), 1: (10.0, 0.0), 2: (-10.0, 0.0)},
+            2,
+            id="horizontal-reversed-facing",
+        ),
+    ],
+)
+def test_best_non_linear_zone_orientations_faces_connected_ports_towards_neighbors(
+    centers: dict[int, tuple[float, float]],
+    expected_orientation: int,
+) -> None:
+    circuit = _branching_orientation_test_circuit()
+
+    orientations = _best_non_linear_zone_orientations(circuit, centers)
+
+    assert orientations[0] == expected_orientation
+
+
+def test_raw_port_positions_keep_connected_ports_closer_than_unconnected_ports() -> (
+    None
+):
+    circuit = _branched_port_layout_test_circuit()
+
+    port_positions = _raw_port_positions(circuit)
+
+    zone0_p0 = port_positions[(0, 0)]
+    zone0_p1 = port_positions[(0, 1)]
+    zone1_p1 = port_positions[(1, 1)]
+    zone2_p0 = port_positions[(2, 0)]
+    zone3_p0 = port_positions[(3, 0)]
+
+    def distance(a: tuple[float, float], b: tuple[float, float]) -> float:
+        dx = a[0] - b[0]
+        dy = a[1] - b[1]
+        return (dx * dx + dy * dy) ** 0.5
+
+    assert distance(zone0_p0, zone1_p1) < distance(zone0_p1, zone1_p1)
+    assert distance(zone0_p1, zone2_p0) < distance(zone0_p0, zone2_p0)
+    assert distance(zone0_p1, zone3_p0) < distance(zone0_p0, zone3_p0)
+
+
+def test_enforce_minimum_zone_border_distance_separates_overlapping_zones() -> None:
+    centers = {
+        0: (100.0, 100.0),
+        1: (120.0, 110.0),
+    }
+    box_sizes = {
+        0: (160.0, 52.0),
+        1: (160.0, 52.0),
+    }
+
+    adjusted = _enforce_minimum_zone_border_distance(
+        centers, box_sizes, min_border_gap=26.0
+    )
+
+    dx = abs(adjusted[1][0] - adjusted[0][0])
+    dy = abs(adjusted[1][1] - adjusted[0][1])
+    required_dx = ((box_sizes[0][0] + box_sizes[1][0]) / 2) + 26.0
+    required_dy = ((box_sizes[0][1] + box_sizes[1][1]) / 2) + 26.0
+    assert dx >= required_dx or dy >= required_dy
 
 
 def test_slot_centers_use_single_horizontal_row() -> None:

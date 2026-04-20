@@ -21,10 +21,14 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from networkx import spring_layout
+from networkx import Graph, spring_layout
 from pytket.circuit import OpType
 
 from ..trap_architecture.architecture import PortId
+from ..trap_architecture.architecture_portgraph import (
+    port_id_to_zone_port,
+    zone_port_to_port_id,
+)
 from .multizone_circuit import MultiZoneCircuit, ValidationError
 
 _SVG_WIDTH = 1280
@@ -38,6 +42,13 @@ _ZONE_MAX_WIDTH = 188
 _ZONE_HEIGHT = 52
 _SLOT_GAP_X = 24
 _SLOT_MARGIN_X = 20
+_NON_LINEAR_ZONE_BORDER_GAP = _ZONE_HEIGHT / 2
+_ORIENTATION_HORIZONTAL = 0
+_ORIENTATION_VERTICAL_P0_BOTTOM = 1
+_ORIENTATION_HORIZONTAL_REVERSED = 2
+_ORIENTATION_VERTICAL_P0_TOP = 3
+_PORT_GRAPH_INTERNAL_WEIGHT = 4.0
+_PORT_GRAPH_CONNECTION_WEIGHT = 1.0
 _QUANTUM_GATE_TYPES = {
     OpType.CX,
     OpType.CY,
@@ -92,6 +103,7 @@ def build_multi_zone_circuit_movie(
     circuit: MultiZoneCircuit,
     *,
     title: str | None = None,
+    condense_quantum_ops: bool = True,
 ) -> MultiZoneCircuitMovie:
     if not circuit.is_compiled:
         raise ValueError(
@@ -111,7 +123,9 @@ def build_multi_zone_circuit_movie(
         }
         for source_zone, target_zone in circuit.macro_arch.zone_graph.edges()
     ]
-    frames = build_multi_zone_circuit_movie_frames(circuit)
+    frames = build_multi_zone_circuit_movie_frames(
+        circuit, condense_quantum_ops=condense_quantum_ops
+    )
     return MultiZoneCircuitMovie(
         title="Multi-Zone Circuit Movie" if title is None else title,
         n_qubits=circuit.pytket_circuit.n_qubits,
@@ -122,6 +136,17 @@ def build_multi_zone_circuit_movie(
 
 
 def build_multi_zone_circuit_movie_frames(
+    circuit: MultiZoneCircuit,
+    *,
+    condense_quantum_ops: bool = True,
+) -> list[MultiZoneCircuitMovieFrame]:
+    frames = _build_raw_multi_zone_circuit_movie_frames(circuit)
+    if condense_quantum_ops:
+        return _condense_quantum_gate_frames(frames)
+    return frames
+
+
+def _build_raw_multi_zone_circuit_movie_frames(
     circuit: MultiZoneCircuit,
 ) -> list[MultiZoneCircuitMovieFrame]:
     if not circuit.is_compiled:
@@ -197,13 +222,87 @@ def build_multi_zone_circuit_movie_frames(
     return frames
 
 
+def _condense_quantum_gate_frames(
+    frames: list[MultiZoneCircuitMovieFrame],
+) -> list[MultiZoneCircuitMovieFrame]:
+    condensed_frames: list[MultiZoneCircuitMovieFrame] = []
+    gate_block: list[MultiZoneCircuitMovieFrame] = []
+
+    def flush_gate_block() -> None:
+        if not gate_block:
+            return
+        if len(gate_block) == 1:
+            condensed_frames.append(
+                MultiZoneCircuitMovieFrame(
+                    command_index=gate_block[0].command_index,
+                    command_text=f"QOPS {_format_qubit_span_text(gate_block[0].highlight_qubits)};",
+                    kind="gate",
+                    zone_placement=deepcopy(gate_block[0].zone_placement),
+                    highlight_qubits=sorted(gate_block[0].highlight_qubits),
+                    shuttle=None,
+                )
+            )
+            gate_block.clear()
+            return
+        involved_qubits = sorted(
+            {qubit for frame in gate_block for qubit in frame.highlight_qubits}
+        )
+        condensed_frames.append(
+            MultiZoneCircuitMovieFrame(
+                command_index=gate_block[0].command_index,
+                command_text=f"QOPS {_format_qubit_span_text(involved_qubits)};",
+                kind="gate",
+                zone_placement=deepcopy(gate_block[-1].zone_placement),
+                highlight_qubits=involved_qubits,
+                shuttle=None,
+            )
+        )
+        gate_block.clear()
+
+    for frame in frames:
+        if frame.kind == "gate":
+            gate_block.append(frame)
+            continue
+        flush_gate_block()
+        condensed_frames.append(frame)
+    flush_gate_block()
+    return condensed_frames
+
+
+def _format_qubit_span_text(qubits: list[int]) -> str:
+    if not qubits:
+        return ""
+    sorted_qubits = sorted(qubits)
+    spans: list[str] = []
+    span_start = sorted_qubits[0]
+    span_end = sorted_qubits[0]
+
+    for qubit in sorted_qubits[1:]:
+        if qubit == span_end + 1:
+            span_end = qubit
+            continue
+        spans.append(
+            f"{span_start}-{span_end}" if span_start != span_end else f"{span_start}"
+        )
+        span_start = qubit
+        span_end = qubit
+
+    spans.append(
+        f"{span_start}-{span_end}" if span_start != span_end else f"{span_start}"
+    )
+    return " ".join(spans)
+
+
 def generate_multi_zone_circuit_movie_html(
     circuit: MultiZoneCircuit,
     *,
     title: str | None = None,
     frame_duration_ms: float = 300.0,
+    condense_quantum_ops: bool = True,
 ) -> str:
-    movie = build_multi_zone_circuit_movie(circuit, title=title)
+    movie = build_multi_zone_circuit_movie(
+        circuit, title=title, condense_quantum_ops=condense_quantum_ops
+    )
     movie_dict = {
         "title": movie.title,
         "n_qubits": movie.n_qubits,
@@ -296,12 +395,49 @@ def generate_multi_zone_circuit_movie_html(
       font-variant-numeric: tabular-nums;
       color: var(--muted);
     }}
-    .caption {{
-      margin: 0 0 10px;
-      min-height: 24px;
-      font-size: 16px;
+    .movie-layout {{
+      display: flex;
+      gap: 18px;
+      align-items: flex-start;
+    }}
+    .operations-panel {{
+      width: 340px;
+      border: 1px solid var(--control-stroke);
+      border-radius: 22px;
+      background: rgba(255, 255, 255, 0.72);
+      padding: 14px 16px;
+      box-sizing: border-box;
+    }}
+    .operations-list {{
+      display: flex;
+      flex-direction: column;
+      gap: 2px;
+    }}
+    .operation-row {{
+      min-height: 26px;
+      padding: 3px 8px;
+      color: var(--muted);
+      font-size: 14px;
+      line-height: 20px;
+      white-space: nowrap;
+      overflow: hidden;
+      text-overflow: ellipsis;
+      border-top: 1px solid transparent;
+      border-bottom: 1px solid transparent;
+    }}
+    .operation-row.movement {{
+      color: #2563eb;
+    }}
+    .operation-row.current {{
+      background: rgba(246, 214, 74, 0.45);
+      border-top-color: #111827;
+      border-bottom-color: #111827;
+    }}
+    .operation-row.empty {{
+      color: transparent;
     }}
     .canvas {{
+      flex: 1 1 auto;
       border: 1px solid var(--control-stroke);
       border-radius: 22px;
       background: rgba(255, 255, 255, 0.72);
@@ -393,15 +529,19 @@ def generate_multi_zone_circuit_movie_html(
       <input id="timeline" type="range" min="0" max="0" value="0">
       <div id="frame-label" class="frame-label"></div>
     </div>
-    <p id="caption" class="caption"></p>
-    <div class="canvas">
-      <svg id="movie" viewBox="0 0 {_SVG_WIDTH} {_SVG_HEIGHT}" aria-label="Multi-zone circuit movie"></svg>
+    <div class="movie-layout">
+      <div class="operations-panel">
+        <div id="operations-list" class="operations-list"></div>
+      </div>
+      <div class="canvas">
+        <svg id="movie" viewBox="0 0 {_SVG_WIDTH} {_SVG_HEIGHT}" aria-label="Multi-zone circuit movie"></svg>
+      </div>
     </div>
   </div>
   <script>
     const movieData = {movie_json};
     const svg = document.getElementById("movie");
-    const caption = document.getElementById("caption");
+    const operationsList = document.getElementById("operations-list");
     const timeline = document.getElementById("timeline");
     const playPause = document.getElementById("play-pause");
     const prevButton = document.getElementById("prev");
@@ -415,6 +555,8 @@ def generate_multi_zone_circuit_movie_html(
     const activeQubitRadius = 13;
     const qubitStroke = "rgba(15, 23, 42, 0.32)";
     const activeQubitStroke = "#7f1d1d";
+    const currentOperationRow = 10;
+    const visibleOperationRows = 16;
     let frameIndex = 0;
     let isPlaying = false;
     let timer = null;
@@ -423,6 +565,9 @@ def generate_multi_zone_circuit_movie_html(
     let shuttleAnimationToken = 0;
 
     timeline.max = String(movieData.frames.length - 1);
+    for (let rowIndex = 0; rowIndex < visibleOperationRows; rowIndex += 1) {{
+      operationsList.appendChild(document.createElement("div"));
+    }}
 
     function createSvg(tag, attrs) {{
       const node = document.createElementNS(ns, tag);
@@ -863,6 +1008,64 @@ def generate_multi_zone_circuit_movie_html(
       shuttleAnimationRequest = requestAnimationFrame(step);
     }}
 
+    function animatePswap(frame, previousFrame, positions) {{
+      if (previousFrame === null || frame.highlight_qubits.length !== 2) {{
+        return;
+      }}
+      const previousPositions = qubitTransforms(previousFrame);
+      const duration = Math.max(120, currentFrameDuration() * 0.99);
+      const token = shuttleAnimationToken;
+      const swapPaths = frame.highlight_qubits.map((qubit) => {{
+        const qubitElement = qubitElements.get(qubit);
+        const start = previousPositions.get(qubit);
+        const end = positions.get(qubit);
+        if (!qubitElement || !start || !end) {{
+          return null;
+        }}
+        const centerX = (start.x + end.x) / 2;
+        const centerY = (start.y + end.y) / 2;
+        return {{
+          qubitElement,
+          end,
+          centerX,
+          centerY,
+          relX: start.x - centerX,
+          relY: start.y - centerY,
+        }};
+      }}).filter((path) => path !== null);
+      if (swapPaths.length !== 2) {{
+        return;
+      }}
+
+      const startedAt = performance.now();
+      const step = (now) => {{
+        if (token !== shuttleAnimationToken) {{
+          return;
+        }}
+        const progress = Math.min((now - startedAt) / duration, 1);
+        const angle = progress * Math.PI;
+        const cosAngle = Math.cos(angle);
+        const sinAngle = Math.sin(angle);
+        swapPaths.forEach((path) => {{
+          const x = path.centerX + (path.relX * cosAngle) - (path.relY * sinAngle);
+          const y = path.centerY + (path.relX * sinAngle) + (path.relY * cosAngle);
+          path.qubitElement.group.setAttribute("transform", translate(x, y));
+        }});
+        if (progress < 1) {{
+          shuttleAnimationRequest = requestAnimationFrame(step);
+        }} else {{
+          swapPaths.forEach((path) => {{
+            path.qubitElement.group.setAttribute(
+              "transform",
+              translate(path.end.x, path.end.y)
+            );
+          }});
+          shuttleAnimationRequest = null;
+        }}
+      }};
+      shuttleAnimationRequest = requestAnimationFrame(step);
+    }}
+
     function renderFrame(index, animate = true) {{
       stopQubitAnimations();
       const frame = movieData.frames[index];
@@ -883,10 +1086,35 @@ def generate_multi_zone_circuit_movie_html(
       }});
       if (animate && frame.kind === "shuttle") {{
         animateShuttle(frame, previousFrame, positions);
+      }} else if (animate && frame.kind === "pswap") {{
+        animatePswap(frame, previousFrame, positions);
       }}
-      caption.textContent = frame.command_text;
+      renderOperationStream(index);
       timeline.value = String(index);
       frameLabel.textContent = `Frame ${{index + 1}} / ${{movieData.frames.length}}`;
+    }}
+
+    function renderOperationStream(index) {{
+      const rows = operationsList.children;
+      for (let rowIndex = 0; rowIndex < visibleOperationRows; rowIndex += 1) {{
+        const frameOffset = currentOperationRow - rowIndex;
+        const frameAtRow = index + frameOffset;
+        const row = rows[rowIndex];
+        row.className = "operation-row";
+        const frameData = movieData.frames[frameAtRow];
+        if (frameData && (frameData.kind === "shuttle" || frameData.kind === "pswap")) {{
+          row.classList.add("movement");
+        }}
+        if (rowIndex === currentOperationRow) {{
+          row.classList.add("current");
+        }}
+        if (frameAtRow < 0 || frameAtRow >= movieData.frames.length) {{
+          row.textContent = "";
+          row.classList.add("empty");
+          continue;
+        }}
+        row.textContent = frameData.command_text;
+      }}
     }}
 
     function stopTimer() {{
@@ -910,7 +1138,7 @@ def generate_multi_zone_circuit_movie_html(
         if (frameIndex >= movieData.frames.length - 1) {{
           stopTimer();
           isPlaying = false;
-          playPause.textContent = "Play";
+          playPause.textContent = "Restart";
           return;
         }}
         frameIndex += 1;
@@ -919,6 +1147,10 @@ def generate_multi_zone_circuit_movie_html(
     }}
 
     playPause.addEventListener("click", () => {{
+      if (!isPlaying && frameIndex >= movieData.frames.length - 1) {{
+        frameIndex = 0;
+        renderFrame(frameIndex, false);
+      }}
       isPlaying = !isPlaying;
       playPause.textContent = isPlaying ? "Pause" : "Play";
       if (isPlaying) {{
@@ -962,6 +1194,7 @@ def write_multi_zone_circuit_movie_html(
     *,
     title: str | None = None,
     frame_duration_ms: float = 300.0,
+    condense_quantum_ops: bool = True,
 ) -> Path:
     path = Path(output_path)
     path.write_text(
@@ -969,6 +1202,7 @@ def write_multi_zone_circuit_movie_html(
             circuit,
             title=title,
             frame_duration_ms=frame_duration_ms,
+            condense_quantum_ops=condense_quantum_ops,
         ),
         encoding="utf-8",
     )
@@ -984,7 +1218,8 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
             zone_height=zone_height,
         )
 
-    raw_positions = _raw_zone_positions(circuit)
+    raw_port_positions = _raw_port_positions(circuit)
+    raw_positions = _raw_zone_positions(circuit, raw_port_positions)
     xs = [position[0] for position in raw_positions.values()]
     ys = [position[1] for position in raw_positions.values()]
     min_x, max_x = min(xs), max(xs)
@@ -992,15 +1227,41 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
     span_x = max(max_x - min_x, 1.0)
     span_y = max(max_y - min_y, 1.0)
 
-    zones: list[dict[str, Any]] = []
+    centers: dict[int, tuple[float, float]] = {}
     for zone in range(circuit.architecture.n_zones):
         x_raw, y_raw = raw_positions[zone]
-        x = _LAYOUT_MARGIN_X + ((x_raw - min_x) / span_x) * (
-            _SVG_WIDTH - zone_width - (2 * _LAYOUT_MARGIN_X)
+        center_x = (
+            _LAYOUT_MARGIN_X
+            + (zone_width / 2)
+            + ((x_raw - min_x) / span_x)
+            * (_SVG_WIDTH - zone_width - (2 * _LAYOUT_MARGIN_X))
         )
-        y = _LAYOUT_MARGIN_Y + ((y_raw - min_y) / span_y) * (
-            _SVG_HEIGHT - zone_height - (2 * _LAYOUT_MARGIN_Y)
+        center_y = (
+            _LAYOUT_MARGIN_Y
+            + (zone_height / 2)
+            + ((y_raw - min_y) / span_y)
+            * (_SVG_HEIGHT - zone_height - (2 * _LAYOUT_MARGIN_Y))
         )
+        centers[zone] = (center_x, center_y)
+
+    orientations = _best_non_linear_zone_orientations(
+        circuit, centers, raw_port_positions
+    )
+    box_sizes = {
+        zone: _oriented_zone_dimensions(zone_width, zone_height, orientations[zone])
+        for zone in range(circuit.architecture.n_zones)
+    }
+    centers = _enforce_minimum_zone_border_distance(
+        centers,
+        box_sizes,
+        min_border_gap=_NON_LINEAR_ZONE_BORDER_GAP,
+    )
+
+    zones: list[dict[str, Any]] = []
+    for zone in range(circuit.architecture.n_zones):
+        center_x, center_y = centers[zone]
+        x = center_x - (zone_width / 2)
+        y = center_y - (zone_height / 2)
         zone_slots = _slot_centers(
             _SlotLayout(
                 x=x,
@@ -1022,9 +1283,9 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
                 "height": zone_height,
                 "base_width": zone_width,
                 "base_height": zone_height,
-                "center_x": round(x + (zone_width / 2), 2),
-                "center_y": round(y + (zone_height / 2), 2),
-                "orientation": 0,
+                "center_x": round(center_x, 2),
+                "center_y": round(center_y, 2),
+                "orientation": orientations[zone],
                 "gate_capacity": circuit.architecture.get_zone_max_ions_gates(zone),
                 "transport_capacity": circuit.architecture.get_zone_max_ions_transport(
                     zone
@@ -1034,6 +1295,133 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
             }
         )
     return zones
+
+
+def _best_non_linear_zone_orientations(
+    circuit: MultiZoneCircuit,
+    centers: dict[int, tuple[float, float]],
+    raw_port_positions: dict[tuple[int, int], tuple[float, float]] | None = None,
+) -> dict[int, int]:
+    return {
+        zone: max(
+            range(4),
+            key=lambda orientation: _score_zone_orientation(
+                circuit, zone, centers, orientation, raw_port_positions
+            ),
+        )
+        for zone in range(circuit.architecture.n_zones)
+    }
+
+
+def _score_zone_orientation(
+    circuit: MultiZoneCircuit,
+    zone: int,
+    centers: dict[int, tuple[float, float]],
+    orientation: int,
+    raw_port_positions: dict[tuple[int, int], tuple[float, float]] | None = None,
+) -> float:
+    zone_x, zone_y = centers[zone]
+    score = 0.0
+    for neighbor in circuit.macro_arch.connected_zones(zone):
+        neighbor_x, neighbor_y = centers[int(neighbor)]
+        dx = neighbor_x - zone_x
+        dy = neighbor_y - zone_y
+        length = (dx * dx + dy * dy) ** 0.5
+        if length == 0:
+            continue
+        port, _ = circuit.macro_arch.get_connected_ports(zone, int(neighbor))
+        port_dx, port_dy = _port_direction(orientation, port)
+        score += ((dx / length) * port_dx) + ((dy / length) * port_dy)
+    if raw_port_positions is not None:
+        axis_score = _orientation_axis_alignment(raw_port_positions, zone, orientation)
+        score += 0.6 * axis_score
+    return score
+
+
+def _port_direction(orientation: int, port: PortId) -> tuple[float, float]:
+    if orientation == _ORIENTATION_VERTICAL_P0_BOTTOM:
+        return (0.0, 1.0) if port == PortId.p0 else (0.0, -1.0)
+    if orientation == _ORIENTATION_HORIZONTAL_REVERSED:
+        return (1.0, 0.0) if port == PortId.p0 else (-1.0, 0.0)
+    if orientation == _ORIENTATION_VERTICAL_P0_TOP:
+        return (0.0, -1.0) if port == PortId.p0 else (0.0, 1.0)
+    return (-1.0, 0.0) if port == PortId.p0 else (1.0, 0.0)
+
+
+def _orientation_axis_alignment(
+    raw_port_positions: dict[tuple[int, int], tuple[float, float]],
+    zone: int,
+    orientation: int,
+) -> float:
+    p0_x, p0_y = raw_port_positions[(zone, 0)]
+    p1_x, p1_y = raw_port_positions[(zone, 1)]
+    dx = p1_x - p0_x
+    dy = p1_y - p0_y
+    length = (dx * dx + dy * dy) ** 0.5
+    if length == 0:
+        return 0.0
+    axis_dx, axis_dy = _orientation_axis(orientation)
+    return ((dx / length) * axis_dx) + ((dy / length) * axis_dy)
+
+
+def _orientation_axis(orientation: int) -> tuple[float, float]:
+    if orientation == _ORIENTATION_VERTICAL_P0_BOTTOM:
+        return (0.0, -1.0)
+    if orientation == _ORIENTATION_HORIZONTAL_REVERSED:
+        return (-1.0, 0.0)
+    if orientation == _ORIENTATION_VERTICAL_P0_TOP:
+        return (0.0, 1.0)
+    return (1.0, 0.0)
+
+
+def _oriented_zone_dimensions(
+    base_width: float, base_height: float, orientation: int
+) -> tuple[float, float]:
+    if orientation in (_ORIENTATION_VERTICAL_P0_BOTTOM, _ORIENTATION_VERTICAL_P0_TOP):
+        return base_height, base_width
+    return base_width, base_height
+
+
+def _enforce_minimum_zone_border_distance(
+    centers: dict[int, tuple[float, float]],
+    box_sizes: dict[int, tuple[float, float]],
+    min_border_gap: float,
+    max_iterations: int = 80,
+) -> dict[int, tuple[float, float]]:
+    adjusted = {zone: [x, y] for zone, (x, y) in centers.items()}
+    for _ in range(max_iterations):
+        moved = False
+        zones = sorted(adjusted)
+        for index, zone_a in enumerate(zones):
+            ax, ay = adjusted[zone_a]
+            width_a, height_a = box_sizes[zone_a]
+            for zone_b in zones[index + 1 :]:
+                bx, by = adjusted[zone_b]
+                width_b, height_b = box_sizes[zone_b]
+                required_dx = (width_a + width_b) / 2 + min_border_gap
+                required_dy = (height_a + height_b) / 2 + min_border_gap
+                overlap_x = required_dx - abs(bx - ax)
+                overlap_y = required_dy - abs(by - ay)
+                if overlap_x <= 0 or overlap_y <= 0:
+                    continue
+                moved = True
+                if overlap_x <= overlap_y:
+                    direction = 1.0 if bx >= ax else -1.0
+                    if bx == ax:
+                        direction = 1.0 if zone_b > zone_a else -1.0
+                    shift = overlap_x / 2
+                    adjusted[zone_a][0] -= direction * shift
+                    adjusted[zone_b][0] += direction * shift
+                else:
+                    direction = 1.0 if by >= ay else -1.0
+                    if by == ay:
+                        direction = 1.0 if zone_b > zone_a else -1.0
+                    shift = overlap_y / 2
+                    adjusted[zone_a][1] -= direction * shift
+                    adjusted[zone_b][1] += direction * shift
+        if not moved:
+            break
+    return {zone: (position[0], position[1]) for zone, position in adjusted.items()}
 
 
 def _wrapped_linear_zone_layout(
@@ -1094,16 +1482,61 @@ def _wrapped_linear_zone_layout(
     return zones
 
 
-def _raw_zone_positions(circuit: MultiZoneCircuit) -> dict[int, tuple[float, float]]:
+def _raw_zone_positions(
+    circuit: MultiZoneCircuit,
+    raw_port_positions: dict[tuple[int, int], tuple[float, float]] | None = None,
+) -> dict[int, tuple[float, float]]:
     if circuit.macro_arch.is_linear_architecture:
         return {
             zone: (float(index), 0.0)
             for index, zone in enumerate(sorted(circuit.macro_arch.zone_graph.nodes()))
         }
-    positions = spring_layout(circuit.macro_arch.zone_graph, seed=11)
+    port_positions = (
+        _raw_port_positions(circuit)
+        if raw_port_positions is None
+        else raw_port_positions
+    )
     return {
-        int(zone): (float(position[0]), float(position[1]))
-        for zone, position in positions.items()
+        zone: (
+            (port_positions[(zone, 0)][0] + port_positions[(zone, 1)][0]) / 2.0,
+            (port_positions[(zone, 0)][1] + port_positions[(zone, 1)][1]) / 2.0,
+        )
+        for zone in range(circuit.architecture.n_zones)
+    }
+
+
+def _raw_port_positions(
+    circuit: MultiZoneCircuit,
+) -> dict[tuple[int, int], tuple[float, float]]:
+    if circuit.macro_arch.is_linear_architecture:
+        return {
+            (int(zone), port): (float(index) * 2.0 + float(port), 0.0)
+            for index, zone in enumerate(sorted(circuit.macro_arch.zone_graph.nodes()))
+            for port in (0, 1)
+        }
+
+    port_graph: Graph[int] = Graph()
+    for zone in range(circuit.architecture.n_zones):
+        port_graph.add_edge(
+            zone_port_to_port_id(zone, 0),
+            zone_port_to_port_id(zone, 1),
+            weight=_PORT_GRAPH_INTERNAL_WEIGHT,
+        )
+    for connection in circuit.architecture.connections:
+        zone0 = connection.zone_port_spec0.zone_id
+        port0 = connection.zone_port_spec0.port_id.value
+        zone1 = connection.zone_port_spec1.zone_id
+        port1 = connection.zone_port_spec1.port_id.value
+        port_graph.add_edge(
+            zone_port_to_port_id(zone0, port0),
+            zone_port_to_port_id(zone1, port1),
+            weight=_PORT_GRAPH_CONNECTION_WEIGHT,
+        )
+
+    positions = spring_layout(port_graph, seed=11, weight="weight")
+    return {
+        port_id_to_zone_port(int(port_id)): (float(position[0]), float(position[1]))
+        for port_id, position in positions.items()
     }
 
 
