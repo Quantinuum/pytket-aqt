@@ -17,6 +17,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selectio
     GraphPartitionGateSelector,
     GreedyGateSelector,
     HypergraphPartitionGateSelector,
+    SingleGateZoneLineArchGateSelector,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
     SingleGateZoneLineArchRouter,
@@ -109,6 +110,14 @@ compilation_settings: dict[str, CompilationSettings] = {
             gate_selector=GreedyGateSelector(only_place_gate_qubits=True),
         ),
     ),
+    "single": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=order_init,
+        routing=RoutingConfig(
+            router=SingleGateZoneLineArchRouter(),
+            gate_selector=SingleGateZoneLineArchGateSelector(),
+        ),
+    ),
 }
 
 
@@ -197,7 +206,7 @@ def main() -> None:
         circuit, compilation_settings["graph"]
     )
     for name, comp_settings in compilation_settings.items():
-        if name != "graph":
+        if name != "single":
             continue
         print("----")
         print(f"Performing {name} routing")

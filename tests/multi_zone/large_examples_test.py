@@ -1,10 +1,6 @@
 import os
 
 import pytest
-from extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
-    GraphPartitionGateSelector,
-    HypergraphPartitionGateSelector,
-)
 
 from pytket import Circuit
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
@@ -12,7 +8,12 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit import (
     write_multi_zone_circuit_movie_html,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+    GraphPartitionGateSelector,
     GreedyGateSelector,
+    HypergraphPartitionGateSelector,
+)
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.single_gate_zone_line_arch_gate_selector import (
+    SingleGateZoneLineArchGateSelector,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
     SingleGateZoneLineArchRouter,
@@ -35,6 +36,7 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_archi
     grid12,
     grid12_mod,
     linear_8_zones,
+    linear_9_zones,
     racetrack,
     racetrack_4_gatezones,
 )
@@ -113,6 +115,10 @@ linear_8_zones_backend = AQTMultiZoneBackend(
     architecture=linear_8_zones, access_token="invalid"
 )
 
+linear_9_zones_backend = AQTMultiZoneBackend(
+    architecture=linear_9_zones, access_token="invalid"
+)
+
 order_init = InitialPlacementSettings(
     algorithm=InitialPlacementAlg.qubit_order,
     zone_free_space=2,
@@ -181,6 +187,14 @@ line_arch_compilation_settings = {
         routing=RoutingConfig(
             router=SingleGateZoneLineArchRouter(),
             gate_selector=HypergraphPartitionGateSelector(only_place_gate_qubits=True),
+        ),
+    ),
+    "line_selector": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=line_order_init,
+        routing=RoutingConfig(
+            router=SingleGateZoneLineArchRouter(),
+            gate_selector=SingleGateZoneLineArchGateSelector(),
         ),
     ),
 }
@@ -318,11 +332,12 @@ def test_quantum_advantage_gate_zone_types_backend(
 @pytest.mark.parametrize(
     "gate_selector",
     [
+        pytest.param("line_selector", marks=skip_if_no_run_long_tests),
+        pytest.param("greedy", marks=skip_if_no_run_long_tests),
         pytest.param(
             "hypergraph_part",
             marks=[skip_if_no_run_long_tests, graph_skipif],
         ),
-        pytest.param("greedy", marks=skip_if_no_run_long_tests),
         pytest.param(
             "graph_part",
             marks=[skip_if_no_run_long_tests, graph_skipif],
@@ -342,6 +357,40 @@ def test_quantum_advantage_linear_8_zones_line_arch_router(
         routed,
         movie_path,
         title=f"Linear 8 Zones QA Circuit Routing: {routed.get_n_shuttles()} shuttles, {routed.get_n_pswaps()} swaps",
+    )
+    assert written_path == movie_path
+    assert movie_path.exists()
+
+
+@skip_if_no_run_long_tests
+@pytest.mark.parametrize(
+    "gate_selector",
+    [
+        pytest.param("line_selector", marks=skip_if_no_run_long_tests),
+        pytest.param("greedy", marks=skip_if_no_run_long_tests),
+        pytest.param(
+            "hypergraph_part",
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
+        pytest.param(
+            "graph_part",
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
+    ],
+)
+def test_quantum_advantage_linear_9_zones_line_arch_router(
+    tmp_path, gate_selector: str
+) -> None:
+    print("Testing linear_8_zones_backend")
+    routed = linear_9_zones_backend.route_compiled(
+        advantage_circuit_30_precomp,
+        line_arch_compilation_settings[gate_selector],
+    )
+    movie_path = tmp_path / "linear_9_zones_quantum_advantage_movie.html"
+    written_path = write_multi_zone_circuit_movie_html(
+        routed,
+        movie_path,
+        title=f"Linear 9 Zones QA Circuit Routing: {routed.get_n_shuttles()} shuttles, {routed.get_n_pswaps()} swaps",
     )
     assert written_path == movie_path
     assert movie_path.exists()
