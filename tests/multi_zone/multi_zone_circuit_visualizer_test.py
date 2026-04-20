@@ -201,6 +201,7 @@ def test_build_multi_zone_circuit_movie_frames_tracks_shuttles_swaps_and_gates()
     assert frames[0].zone_placement == [[0, 1], [2], [], []]
     shuttle_frame = next(frame for frame in frames if frame.kind == "shuttle")
     assert shuttle_frame.zone_placement == [[0], [1, 2], [], []]
+    assert shuttle_frame.command_text == "SHUTTLE(0→1) 1;"
     assert shuttle_frame.highlight_qubits == [1]
     assert shuttle_frame.shuttle == {
         "source_zone": 0,
@@ -211,6 +212,7 @@ def test_build_multi_zone_circuit_movie_frames_tracks_shuttles_swaps_and_gates()
     }
     pswap_frame = next(frame for frame in frames if frame.kind == "pswap")
     assert pswap_frame.zone_placement == [[0], [2, 1], [], []]
+    assert pswap_frame.command_text == "PSWAP 1↔2;"
     gate_frame = next(frame for frame in frames if frame.kind == "gate")
     assert gate_frame.command_text == "QOPS 1-2;"
     assert gate_frame.highlight_qubits == [1, 2]
@@ -251,6 +253,7 @@ def test_build_multi_zone_circuit_movie_frames_can_keep_individual_gate_frames()
     assert frames[1].command_text.startswith("Rx(")
     assert frames[2].command_text.startswith("Ry(")
     assert frames[3].command_text.startswith("XXPhase(")
+    assert frames[4].command_text == "SHUTTLE(1→2) 1;"
     assert frames[5].command_text.startswith("Rz(")
     assert frames[6].command_text.startswith("XXPhase(")
 
@@ -265,6 +268,8 @@ def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -
     assert "movieData" in html
     assert "Initial placement" in html
     assert "QOPS 1-2;" in html
+    assert "SHUTTLE(0\\u21921) 1;" in html
+    assert "PSWAP 1\\u21942;" in html
     assert '"n_qubits": 3' in html
     assert "textContent = String(qubit);" in html
     assert 'return "#3a86ff";' in html
@@ -317,10 +322,12 @@ def test_generate_multi_zone_circuit_movie_html_contains_operation_stream_hooks(
     html = generate_multi_zone_circuit_movie_html(circuit, title="Visualizer Test")
 
     assert ".operations-panel {" in html
+    assert ".operation-row.gate {" in html
     assert ".operation-row.movement {" in html
     assert ".operation-row.current {" in html
     assert "function renderOperationStream(index)" in html
     assert 'row.className = "operation-row";' in html
+    assert 'row.classList.add("gate");' in html
     assert 'row.classList.add("movement");' in html
     assert 'row.classList.add("current");' in html
     assert "row.textContent = frameData.command_text;" in html
@@ -389,6 +396,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert 'svg.addEventListener("pointerup", stopZoneDrag);' in html
     assert "--gate-zone-fill: #f3c2c2;" in html
     assert "--gate-zone-stroke: #ba5c5c;" in html
+    assert "color: #b91c1c;" in html
     assert "label.textContent = `Z${zone.id}`;" in html
     assert '} else if (animate && frame.kind === "pswap") {' in html
     assert (

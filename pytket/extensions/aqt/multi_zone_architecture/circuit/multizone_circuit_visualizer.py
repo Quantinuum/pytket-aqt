@@ -70,13 +70,14 @@ _QUANTUM_GATE_TYPES = {
 }
 
 
-@dataclass(frozen=True)
+@dataclass
 class MultiZoneCircuitMovieFrame:
     command_index: int | None
     command_text: str
     kind: str
     zone_placement: list[list[int]]
     highlight_qubits: list[int]
+    upcoming_qubits: list[int]
     shuttle: dict[str, Any] | None = None
 
 
@@ -103,6 +104,7 @@ def build_multi_zone_circuit_movie(
     circuit: MultiZoneCircuit,
     *,
     title: str | None = None,
+    highlight_upcoming_qubits: bool = True,
     condense_quantum_ops: bool = True,
 ) -> MultiZoneCircuitMovie:
     if not circuit.is_compiled:
@@ -124,7 +126,9 @@ def build_multi_zone_circuit_movie(
         for source_zone, target_zone in circuit.macro_arch.zone_graph.edges()
     ]
     frames = build_multi_zone_circuit_movie_frames(
-        circuit, condense_quantum_ops=condense_quantum_ops
+        circuit,
+        highlight_upcoming_qubits=highlight_upcoming_qubits,
+        condense_quantum_ops=condense_quantum_ops,
     )
     return MultiZoneCircuitMovie(
         title="Multi-Zone Circuit Movie" if title is None else title,
@@ -138,11 +142,14 @@ def build_multi_zone_circuit_movie(
 def build_multi_zone_circuit_movie_frames(
     circuit: MultiZoneCircuit,
     *,
+    highlight_upcoming_qubits: bool = True,
     condense_quantum_ops: bool = True,
 ) -> list[MultiZoneCircuitMovieFrame]:
     frames = _build_raw_multi_zone_circuit_movie_frames(circuit)
+    if highlight_upcoming_qubits:
+        frames = _set_upcoming_qubits(frames)
     if condense_quantum_ops:
-        return _condense_quantum_gate_frames(frames)
+        frames = _condense_quantum_gate_frames(frames)
     return frames
 
 
@@ -162,6 +169,7 @@ def _build_raw_multi_zone_circuit_movie_frames(
             kind="initial",
             zone_placement=deepcopy(current_placement),
             highlight_qubits=[],
+            upcoming_qubits=[],
             shuttle=None,
         )
     ]
@@ -182,10 +190,11 @@ def _build_raw_multi_zone_circuit_movie_frames(
             _apply_pswap(current_placement, cmd)
             frame = MultiZoneCircuitMovieFrame(
                 command_index=command_index,
-                command_text=str(cmd),
+                command_text=_format_pswap_command_text(cmd),
                 kind="pswap",
                 zone_placement=deepcopy(current_placement),
                 highlight_qubits=[arg.index[0] for arg in cmd.args],
+                upcoming_qubits=[],
             )
         elif "SHUTTLE" in op_string:
             source_zone, target_zone, source_port, target_port = (
@@ -194,10 +203,11 @@ def _build_raw_multi_zone_circuit_movie_frames(
             _apply_shuttle(circuit, current_placement, cmd)
             frame = MultiZoneCircuitMovieFrame(
                 command_index=command_index,
-                command_text=str(cmd),
+                command_text=_format_shuttle_command_text(cmd),
                 kind="shuttle",
                 zone_placement=deepcopy(current_placement),
                 highlight_qubits=[arg.index[0] for arg in cmd.args],
+                upcoming_qubits=[],
                 shuttle={
                     "source_zone": source_zone,
                     "target_zone": target_zone,
@@ -213,12 +223,32 @@ def _build_raw_multi_zone_circuit_movie_frames(
                 kind="gate",
                 zone_placement=deepcopy(current_placement),
                 highlight_qubits=[arg.index[0] for arg in cmd.args],
+                upcoming_qubits=[],
                 shuttle=None,
             )
         else:
             continue
         frames.append(frame)
 
+    return frames
+
+
+def _set_upcoming_qubits(
+    frames: list[MultiZoneCircuitMovieFrame],
+) -> list[MultiZoneCircuitMovieFrame]:
+    involved_qubits = set()
+    reset = False
+    for frame in reversed(frames):
+        if frame.kind == "gate":
+            if reset:
+                involved_qubits.clear()
+                reset = False
+            frame.upcoming_qubits = list(involved_qubits)
+            involved_qubits.update(frame.highlight_qubits)
+            continue
+        if frame.kind in ["pswap", "shuttle"]:
+            reset = True
+            frame.upcoming_qubits = list(involved_qubits)
     return frames
 
 
@@ -239,6 +269,7 @@ def _condense_quantum_gate_frames(
                     kind="gate",
                     zone_placement=deepcopy(gate_block[0].zone_placement),
                     highlight_qubits=sorted(gate_block[0].highlight_qubits),
+                    upcoming_qubits=[],
                     shuttle=None,
                 )
             )
@@ -254,6 +285,7 @@ def _condense_quantum_gate_frames(
                 kind="gate",
                 zone_placement=deepcopy(gate_block[-1].zone_placement),
                 highlight_qubits=involved_qubits,
+                upcoming_qubits=[],
                 shuttle=None,
             )
         )
@@ -293,15 +325,32 @@ def _format_qubit_span_text(qubits: list[int]) -> str:
     return " ".join(spans)
 
 
+def _format_pswap_command_text(cmd: Any) -> str:
+    qubit_0 = cmd.args[0].index[0]
+    qubit_1 = cmd.args[1].index[0]
+    return f"PSWAP {qubit_0}↔{qubit_1};"
+
+
+def _format_shuttle_command_text(cmd: Any) -> str:
+    source_zone = int(cmd.op.params[0])
+    target_zone = int(cmd.op.params[1])
+    qubit_text = " ".join(str(arg.index[0]) for arg in cmd.args)
+    return f"SHUTTLE({source_zone}→{target_zone}) {qubit_text};"
+
+
 def generate_multi_zone_circuit_movie_html(
     circuit: MultiZoneCircuit,
     *,
     title: str | None = None,
     frame_duration_ms: float = 300.0,
+    highlight_upcoming_qubits: bool = True,
     condense_quantum_ops: bool = True,
 ) -> str:
     movie = build_multi_zone_circuit_movie(
-        circuit, title=title, condense_quantum_ops=condense_quantum_ops
+        circuit,
+        title=title,
+        highlight_upcoming_qubits=highlight_upcoming_qubits,
+        condense_quantum_ops=condense_quantum_ops,
     )
     movie_dict = {
         "title": movie.title,
@@ -427,6 +476,9 @@ def generate_multi_zone_circuit_movie_html(
     }}
     .operation-row.movement {{
       color: #2563eb;
+    }}
+    .operation-row.gate {{
+      color: #b91c1c;
     }}
     .operation-row.current {{
       background: rgba(246, 214, 74, 0.45);
@@ -920,8 +972,14 @@ def generate_multi_zone_circuit_movie_html(
       return positions;
     }}
 
-    function setQubitAppearance(qubitElement, qubit, active) {{
-      qubitElement.circle.setAttribute("fill", active ? "#d62828" : qubitColor(qubit));
+    function setQubitAppearance(qubitElement, qubit, active, upcoming) {{
+      if (active){{
+        qubitElement.circle.setAttribute("fill", "#d62828");
+      }} else if (upcoming) {{
+        qubitElement.circle.setAttribute("fill", "#eace09");
+      }} else {{
+        qubitElement.circle.setAttribute("fill", qubitColor(qubit));
+      }}
       qubitElement.circle.setAttribute(
         "stroke",
         active ? activeQubitStroke : qubitStroke
@@ -1073,6 +1131,9 @@ def generate_multi_zone_circuit_movie_html(
       const activeQubits = new Set(
         frame.kind === "gate" ? frame.highlight_qubits : []
       );
+      const upcomingQubits = new Set(
+        frame.upcoming_qubits
+      );
       const positions = qubitTransforms(frame);
       qubitElements.forEach((qubitElement, qubit) => {{
         const pos = positions.get(qubit);
@@ -1082,7 +1143,7 @@ def generate_multi_zone_circuit_movie_html(
         }}
         qubitElement.group.style.opacity = "1";
         qubitElement.group.setAttribute("transform", translate(pos.x, pos.y));
-        setQubitAppearance(qubitElement, qubit, activeQubits.has(qubit));
+        setQubitAppearance(qubitElement, qubit, activeQubits.has(qubit), upcomingQubits.has(qubit));
       }});
       if (animate && frame.kind === "shuttle") {{
         animateShuttle(frame, previousFrame, positions);
@@ -1104,6 +1165,8 @@ def generate_multi_zone_circuit_movie_html(
         const frameData = movieData.frames[frameAtRow];
         if (frameData && (frameData.kind === "shuttle" || frameData.kind === "pswap")) {{
           row.classList.add("movement");
+        }} else if (frameData && frameData.kind === "gate") {{
+          row.classList.add("gate");
         }}
         if (rowIndex === currentOperationRow) {{
           row.classList.add("current");
@@ -1188,12 +1251,13 @@ def generate_multi_zone_circuit_movie_html(
 """
 
 
-def write_multi_zone_circuit_movie_html(
+def write_multi_zone_circuit_movie_html(  # noqa PLR0913
     circuit: MultiZoneCircuit,
     output_path: str | Path,
     *,
     title: str | None = None,
     frame_duration_ms: float = 300.0,
+    highlight_upcoming_qubits: bool = True,
     condense_quantum_ops: bool = True,
 ) -> Path:
     path = Path(output_path)
@@ -1202,6 +1266,7 @@ def write_multi_zone_circuit_movie_html(
             circuit,
             title=title,
             frame_duration_ms=frame_duration_ms,
+            highlight_upcoming_qubits=highlight_upcoming_qubits,
             condense_quantum_ops=condense_quantum_ops,
         ),
         encoding="utf-8",
