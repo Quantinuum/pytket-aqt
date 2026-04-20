@@ -74,7 +74,7 @@ def route_circuit(
 
         old = [set(zone_q) for zone_q in dynamic_arch.trap_configuration.zone_placement]
         new = [set(zone_q) for zone_q in target_config]
-        if old == new:
+        if old == new or all(len(zone) == 0 for zone in new):
             if isinstance(gate_selector, GreedyGateSelector):
                 raise Exception(
                     f"Gate selector did not produce new configuration. Routing step: {routing_step}"
@@ -82,7 +82,14 @@ def route_circuit(
             logger.warning(
                 "Chosen gate selector did not produce new configuration. Using greedy gate selection for this round"
             )
-            target_config = GreedyGateSelector().next_config(dynamic_arch, commands)
+            fallback_selector = GreedyGateSelector(
+                only_place_gate_qubits=gate_selector.only_places_gate_qubits()
+            )
+            target_config = fallback_selector.next_config(dynamic_arch, commands)
+            if old == [set(zone_q) for zone_q in target_config]:
+                raise Exception(
+                    f"Fallback gate selector did not produce new configuration. Routing step: {routing_step}"
+                )
 
         old_placement = deepcopy(dynamic_arch.trap_configuration.zone_placement)
         routing_result = router.route_source_to_target_config(

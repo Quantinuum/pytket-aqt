@@ -75,6 +75,9 @@ class HypergraphPartitionGateSelector(GateSelector):
         self._max_depth = max_depth
         self._only_specify_gate_qubits = only_place_gate_qubits
 
+    def only_places_gate_qubits(self) -> bool:
+        return self._only_specify_gate_qubits
+
     def next_config(
         self,
         dyn_arch: DynamicArch,

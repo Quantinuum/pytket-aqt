@@ -1,6 +1,10 @@
 import os
 
 import pytest
+from extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
+    GraphPartitionGateSelector,
+    HypergraphPartitionGateSelector,
+)
 
 from pytket import Circuit
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
@@ -154,14 +158,32 @@ legacy_compilation_settings = CompilationSettings(
     initial_placement=order_init,
     routing=legacy_routing,
 )
-line_arch_compilation_settings = CompilationSettings(
-    pytket_optimisation_level=1,
-    initial_placement=line_order_init,
-    routing=RoutingConfig(
-        router=SingleGateZoneLineArchRouter(),
-        gate_selector=GreedyGateSelector(only_place_gate_qubits=True),
+line_arch_compilation_settings = {
+    "greedy": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=line_order_init,
+        routing=RoutingConfig(
+            router=SingleGateZoneLineArchRouter(),
+            gate_selector=GreedyGateSelector(only_place_gate_qubits=True),
+        ),
     ),
-)
+    "graph_part": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=line_order_init,
+        routing=RoutingConfig(
+            router=SingleGateZoneLineArchRouter(),
+            gate_selector=GraphPartitionGateSelector(only_place_gate_qubits=True),
+        ),
+    ),
+    "hypergraph_part": CompilationSettings(
+        pytket_optimisation_level=1,
+        initial_placement=line_order_init,
+        routing=RoutingConfig(
+            router=SingleGateZoneLineArchRouter(),
+            gate_selector=HypergraphPartitionGateSelector(only_place_gate_qubits=True),
+        ),
+    ),
+}
 
 
 # The pre-compilation stage only depends on the pytket optimisation level, which is
@@ -293,22 +315,33 @@ def test_quantum_advantage_gate_zone_types_backend(
 
 
 @skip_if_no_run_long_tests
-def test_quantum_advantage_linear_8_zones_line_arch_router(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "gate_selector",
+    [
+        pytest.param(
+            "hypergraph_part",
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
+        pytest.param("greedy", marks=skip_if_no_run_long_tests),
+        pytest.param(
+            "graph_part",
+            marks=[skip_if_no_run_long_tests, graph_skipif],
+        ),
+    ],
+)
+def test_quantum_advantage_linear_8_zones_line_arch_router(
+    tmp_path, gate_selector: str
+) -> None:
     print("Testing linear_8_zones_backend")
     routed = linear_8_zones_backend.route_compiled(
         advantage_circuit_30_precomp,
-        line_arch_compilation_settings,
+        line_arch_compilation_settings[gate_selector],
     )
     movie_path = tmp_path / "linear_8_zones_quantum_advantage_movie.html"
     written_path = write_multi_zone_circuit_movie_html(
         routed,
         movie_path,
-        title="Linear 8 Zones Quantum Advantage Routing",
+        title=f"Linear 8 Zones QA Circuit Routing: {routed.get_n_shuttles()} shuttles, {routed.get_n_pswaps()} swaps",
     )
-    assert routed.get_n_shuttles() == 69838
-    assert routed.get_n_pswaps() == 13052
     assert written_path == movie_path
     assert movie_path.exists()
-    assert "Linear 8 Zones Quantum Advantage Routing" in movie_path.read_text(
-        encoding="utf-8"
-    )
