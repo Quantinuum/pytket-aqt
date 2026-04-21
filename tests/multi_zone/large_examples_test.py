@@ -347,7 +347,6 @@ def test_quantum_advantage_gate_zone_types_backend(
 def test_quantum_advantage_linear_8_zones_line_arch_router(
     tmp_path, gate_selector: str
 ) -> None:
-    print("Testing linear_8_zones_backend")
     routed = linear_8_zones_backend.route_compiled(
         advantage_circuit_30_precomp,
         line_arch_compilation_settings[gate_selector],
@@ -381,7 +380,6 @@ def test_quantum_advantage_linear_8_zones_line_arch_router(
 def test_quantum_advantage_linear_9_zones_line_arch_router(
     tmp_path, gate_selector: str
 ) -> None:
-    print("Testing linear_8_zones_backend")
     routed = linear_9_zones_backend.route_compiled(
         advantage_circuit_30_precomp,
         line_arch_compilation_settings[gate_selector],
