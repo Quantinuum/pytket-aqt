@@ -19,7 +19,11 @@ from pytket.circuit import Circuit
 from ..circuit.helpers import TrapConfiguration, ZonePlacement
 from ..circuit.multizone_circuit import MultiZoneCircuit
 from ..trap_architecture.architecture import MultiZoneArchitectureSpec
-from ..trap_architecture.dynamic_architecture import DynamicArch
+from ..trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    LinearDynamicArch,
+    SgzlDynamicArch,
+)
 from .command_filtering import filter_implementable_commands
 from .gate_selection.greedy_gate_selection import GreedyGateSelector
 from .routing_config import RoutingConfig
@@ -47,9 +51,13 @@ def route_circuit(
     :param routing_config: Configuration to control routing options
     """
 
-    dynamic_arch = DynamicArch(
+    dynamic_arch: DynamicArch = DynamicArch(
         arch, TrapConfiguration(circuit.n_qubits, initial_placement)
     )
+    if dynamic_arch.is_linear_architecture:
+        dynamic_arch = LinearDynamicArch.from_dynamic_arch(dynamic_arch)
+        if len(dynamic_arch.gate_zones) == 1:
+            dynamic_arch = SgzlDynamicArch.from_linear_dynamic_arch(dynamic_arch)
 
     mz_circuit = MultiZoneCircuit(
         arch, initial_placement, circuit.n_qubits, circuit.n_bits

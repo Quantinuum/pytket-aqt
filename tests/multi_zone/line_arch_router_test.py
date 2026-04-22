@@ -41,6 +41,7 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architectur
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     DynamicArch,
+    LinearDynamicArch,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     four_zones_in_a_line,
@@ -80,7 +81,7 @@ def _line_architecture(zone_gate_caps: list[int]) -> MultiZoneArchitectureSpec:
 def test_line_arch_router_returns_dummy_routing_result_for_linear_architecture() -> (
     None
 ):
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         four_zones_in_a_line, _empty_configuration(four_zones_in_a_line.n_zones)
     )
 
@@ -93,7 +94,9 @@ def test_line_arch_router_returns_dummy_routing_result_for_linear_architecture()
 
 
 def test_line_arch_router_builds_pebble_hole_graph_from_dynamic_arch() -> None:
-    dyn_arch = DynamicArch(four_zones_in_a_line, _configuration([[0, 1], [2], [], []]))
+    dyn_arch = LinearDynamicArch(
+        four_zones_in_a_line, _configuration([[0, 1], [2], [], []])
+    )
 
     pebble_hole_graph = dyn_arch.pebble_hole_graph()
 
@@ -134,7 +137,7 @@ def test_line_arch_router_target_zone_interval_qubits_include_sandwiched_qubits(
     target_placement: list[list[int]],
     expected_interval_qubits: list[list[int]],
 ) -> None:
-    dyn_arch = DynamicArch(four_zones_in_a_line, _configuration(zone_placement))
+    dyn_arch = LinearDynamicArch(four_zones_in_a_line, _configuration(zone_placement))
 
     interval_qubits = target_zone_interval_qubits(
         dyn_arch,
@@ -210,7 +213,7 @@ def test_swap_free_routing_segmentation_matches_expected_result(
     expected_block_sizes: list[int] | None,
     expected_zone_placement: list[list[int]] | None,
 ) -> None:
-    dyn_arch = DynamicArch(arch, _configuration(zone_placement))
+    dyn_arch = LinearDynamicArch(arch, _configuration(zone_placement))
 
     segmentation = swap_free_routing_segmentation(
         dyn_arch,
@@ -229,7 +232,7 @@ def test_swap_free_routing_segmentation_matches_expected_result(
 def test_swap_free_routing_segmentation_returns_block_sizes_and_zone_placement() -> (
     None
 ):
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3, 3]),
         _configuration([[0, 1], [2, 3], [4]]),
     )
@@ -246,7 +249,7 @@ def test_swap_free_routing_segmentation_returns_block_sizes_and_zone_placement()
 
 
 def test_swap_free_routing_segmentation_returns_none_when_swaps_are_required() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3]),
         _configuration([[0, 1, 2], [3]]),
     )
@@ -260,7 +263,7 @@ def test_swap_free_routing_segmentation_returns_none_when_swaps_are_required() -
 
 
 def test_analyze_swap_free_routing_reports_inversion_failure_witness() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3]),
         _configuration([[0, 1], [2, 3]]),
     )
@@ -277,7 +280,7 @@ def test_analyze_swap_free_routing_reports_inversion_failure_witness() -> None:
 
 
 def test_analyze_swap_free_routing_reports_boundary_failure_witness() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3]),
         _configuration([[0, 1, 2], [3]]),
     )
@@ -295,7 +298,7 @@ def test_analyze_swap_free_routing_reports_boundary_failure_witness() -> None:
 def test_execute_swap_free_segmentation_returns_shuttles_and_updates_dynamic_arch() -> (
     None
 ):
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3, 3]),
         _configuration([[0, 1], [2, 3], [4]]),
     )
@@ -319,7 +322,7 @@ def test_execute_swap_free_segmentation_returns_shuttles_and_updates_dynamic_arc
 
 
 def test_execute_adjacent_swap_in_workspace_isolates_pair_and_swaps_them() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3, 3]),
         _configuration([[0, 1], [2, 3], [4]]),
     )
@@ -340,7 +343,7 @@ def test_execute_adjacent_swap_in_workspace_isolates_pair_and_swaps_them() -> No
 
 
 def test_execute_adjacent_swap_in_workspace_requires_adjacent_qubits() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3, 3]),
         _configuration([[0, 1], [2, 3], [4]]),
     )
@@ -353,7 +356,7 @@ def test_execute_adjacent_swap_in_workspace_requires_adjacent_qubits() -> None:
 
 
 def test_line_arch_router_repairs_simple_inversion_with_greedy_workspace_swap() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3]),
         _configuration([[0, 1], [2]]),
     )
@@ -372,7 +375,7 @@ def test_line_arch_router_repairs_simple_inversion_with_greedy_workspace_swap() 
 
 
 def test_line_arch_router_raises_when_no_legal_workspace_swap_exists() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 3]),
         _configuration([[0, 1, 2], [3]]),
     )
@@ -388,7 +391,7 @@ def test_line_arch_router_raises_when_no_legal_workspace_swap_exists() -> None:
 
 
 def test_line_arch_routing_possible_but_fails() -> None:
-    dyn_arch = DynamicArch(
+    dyn_arch = LinearDynamicArch(
         _line_architecture([3, 2, 3]),
         _configuration([[0, 1, 2], [4], [3]]),
     )
@@ -404,7 +407,10 @@ def test_line_arch_router_fails_for_non_linear_architecture() -> None:
 
     with pytest.raises(
         ValueError,
-        match=r"LineArchRouter can only be used with linear architectures\.",
+        match=(
+            r"This operation requires a LinearDynamicArch input for a linear "
+            r"architecture\."
+        ),
     ):
         LineArchRouter().route_source_to_target_config(
             dyn_arch, dyn_arch.trap_configuration.zone_placement

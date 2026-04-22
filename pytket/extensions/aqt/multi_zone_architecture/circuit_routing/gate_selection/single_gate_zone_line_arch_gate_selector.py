@@ -20,78 +20,36 @@ from pytket import OpType
 
 from ...circuit.helpers import ZonePlacement
 from ...depth_list.depth_list import DepthInfo, depth_info_from_command_list
-from ...trap_architecture.dynamic_architecture import DynamicArch
-from ..qubit_routing.line_arch_router import (
-    linearly_ordered_zones,
-    ordered_qubits,
+from ...trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    SgzlDynamicArch,
+    require_sgzl_dynamic_arch,
 )
 from .gate_selector_protocol import GateSelector
 
 
-def _single_gate_zone(dyn_arch: DynamicArch) -> int:
-    if not dyn_arch.is_linear_architecture:
-        raise ValueError(
-            "SingleGateZoneLineArchRouter can only be used with linear architectures."
-        )
-    if len(dyn_arch.gate_zones) != 1:
-        raise ValueError(
-            "SingleGateZoneLineArchRouter requires an architecture with exactly one gate zone."
-        )
-    return dyn_arch.gate_zones[0]
-
-
-def _single_gate_zone_capacities(
-    dyn_arch: DynamicArch, gate_zone: int
-) -> tuple[int, int, int]:
-    ordered_zones = linearly_ordered_zones(dyn_arch)
-    gate_zone_position = ordered_zones.index(gate_zone)
-    left_capacity = sum(
-        int(dyn_arch.zone_max_gate_cap[zone])
-        for zone in ordered_zones[:gate_zone_position]
-    )
-    gate_capacity = int(dyn_arch.zone_max_gate_cap[gate_zone])
-    right_capacity = sum(
-        int(dyn_arch.zone_max_gate_cap[zone])
-        for zone in ordered_zones[gate_zone_position + 1 :]
-    )
-    return left_capacity, gate_capacity, right_capacity
-
-
-def _interval_counts(
-    current_order: list[int], target_gate_qubits: list[int]
-) -> tuple[int, int, int]:
-    qubit_positions = {qubit: i for i, qubit in enumerate(current_order)}
-    target_positions = sorted(qubit_positions[qubit] for qubit in target_gate_qubits)
-    left_count = target_positions[0]
-    interval_count = target_positions[-1] - target_positions[0] + 1
-    right_count = len(current_order) - target_positions[-1] - 1
-    return left_count, interval_count, right_count
-
-
 def _swap_free_single_gate_zone_possible(
-    dyn_arch: DynamicArch, target_gate_qubits: list[int], gate_zone: int
+    dyn_arch: SgzlDynamicArch,
+    target_gate_qubits: list[int],
 ) -> tuple[bool, int]:
     if not target_gate_qubits:
-        return True, 0
-    left_count, interval_count, right_count = _interval_counts(
-        ordered_qubits(dyn_arch), target_gate_qubits
-    )
-    left_capacity, gate_capacity, right_capacity = _single_gate_zone_capacities(
-        dyn_arch, gate_zone
+        raise ValueError(
+            "No target qubits provided to _swap_free_single_gate_zone_possible."
+        )
+    left_count, interval_count, right_count = dyn_arch.interval_counts(
+        target_gate_qubits
     )
     return (
-        interval_count <= gate_capacity
-        and left_count <= left_capacity
-        and right_count <= right_capacity
+        interval_count <= dyn_arch.gate_capacity
+        and left_count <= dyn_arch.left_capacity
+        and right_count <= dyn_arch.right_capacity
     ), interval_count
 
 
 def handle_2qb_gates_remaining(
-    dyn_arch: DynamicArch, depth_info: DepthInfo
+    dyn_arch: SgzlDynamicArch, depth_info: DepthInfo
 ) -> ZonePlacement:
     target_placement = [[] for _ in range(dyn_arch.n_zones)]
-    gate_zone = _single_gate_zone(dyn_arch)
-    gate_capacity = int(dyn_arch.zone_max_gate_cap[gate_zone])
     largest_swap_free_list = []
     smallest_interval_list = []
     current_interval_count = dyn_arch.n_qubits
@@ -100,10 +58,10 @@ def handle_2qb_gates_remaining(
         swap_free_block_current_depth_found = False
         new_smallest_interval = False
         for block in depth:
-            if len(block) > gate_capacity:
+            if len(block) > dyn_arch.gate_capacity:
                 continue
             swap_free, interval_length = _swap_free_single_gate_zone_possible(
-                dyn_arch, list(block), gate_zone
+                dyn_arch, list(block)
             )
             if swap_free:
                 swap_free_block_found = True
@@ -121,19 +79,18 @@ def handle_2qb_gates_remaining(
             break
 
     if largest_swap_free_list:
-        target_placement[gate_zone] = largest_swap_free_list
+        target_placement[dyn_arch.single_gate_zone] = largest_swap_free_list
     else:
-        target_placement[gate_zone] = smallest_interval_list
+        target_placement[dyn_arch.single_gate_zone] = smallest_interval_list
 
     return target_placement
 
 
 def handle_only_single_qubit_gates_remaining(
-    dyn_arch: DynamicArch, remaining_commands: list[Command]
+    dyn_arch: SgzlDynamicArch, remaining_commands: list[Command]
 ) -> ZonePlacement:
     target_placement = [[] for _ in range(dyn_arch.n_zones)]
-    gate_zone = _single_gate_zone(dyn_arch)
-    gate_capacity = int(dyn_arch.zone_max_gate_cap[gate_zone])
+    gate_zone = dyn_arch.single_gate_zone
     largest_swap_free_list = []
     smallest_interval_list = []
     current_interval_count = dyn_arch.n_qubits
@@ -143,12 +100,12 @@ def handle_only_single_qubit_gates_remaining(
             continue
         qubits_with_gates.append(cmd.args[0].index[0])
     swap_free_block_found = False
-    for i in range(1, min(len(qubits_with_gates), gate_capacity)):
+    for i in range(1, min(len(qubits_with_gates), dyn_arch.gate_capacity)):
         swap_free_block_current_depth_found = False
         new_smallest_interval = False
         for block in combinations(qubits_with_gates, i):
             swap_free, interval_length = _swap_free_single_gate_zone_possible(
-                dyn_arch, list(block), gate_zone
+                dyn_arch, list(block)
             )
             if swap_free:
                 swap_free_block_found = True
@@ -184,16 +141,19 @@ class SingleGateZoneLineArchGateSelector(GateSelector):
         return True
 
     def next_config(
-        self, dyn_arch: DynamicArch, remaining_commands: list[Command]
+        self,
+        dyn_arch: DynamicArch,
+        remaining_commands: list[Command],
     ) -> ZonePlacement:
-        current_configuration = dyn_arch.trap_configuration
+        sgzl_dyn_arch = require_sgzl_dynamic_arch(dyn_arch)
+        current_configuration = sgzl_dyn_arch.trap_configuration
         n_qubits = current_configuration.n_qubits
         depth_info = depth_info_from_command_list(n_qubits, remaining_commands)
         if depth_info.depth_list:
-            placement = handle_2qb_gates_remaining(dyn_arch, depth_info)
+            placement = handle_2qb_gates_remaining(sgzl_dyn_arch, depth_info)
         else:
             placement = handle_only_single_qubit_gates_remaining(
-                dyn_arch, remaining_commands
+                sgzl_dyn_arch, remaining_commands
             )
 
         return placement

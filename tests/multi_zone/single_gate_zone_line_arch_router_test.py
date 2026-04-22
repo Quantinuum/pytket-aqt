@@ -32,6 +32,7 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architectur
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     DynamicArch,
+    SgzlDynamicArch,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     four_zones_in_a_line,
@@ -78,7 +79,9 @@ def _single_gate_zone_line_architecture(
 def test_single_gate_zone_line_arch_router_returns_empty_result_for_empty_target_placement() -> (
     None
 ):
-    dyn_arch = DynamicArch(linear_8_zones, _empty_configuration(linear_8_zones.n_zones))
+    dyn_arch = SgzlDynamicArch(
+        linear_8_zones, _empty_configuration(linear_8_zones.n_zones)
+    )
 
     result = SingleGateZoneLineArchRouter().route_source_to_target_config(
         dyn_arch, dyn_arch.trap_configuration.zone_placement
@@ -92,7 +95,7 @@ def test_single_gate_zone_line_arch_router_routes_swap_free_case_into_gate_zone(
     None
 ):
     arch = _single_gate_zone_line_architecture([2, 2, 2], gate_zone=1)
-    dyn_arch = DynamicArch(arch, _configuration([[0], [1], [2]]))
+    dyn_arch = SgzlDynamicArch(arch, _configuration([[0], [1], [2]]))
 
     result = SingleGateZoneLineArchRouter().route_source_to_target_config(
         dyn_arch,
@@ -108,7 +111,7 @@ def test_single_gate_zone_line_arch_router_uses_swaps_when_gate_interval_is_too_
     None
 ):
     arch = _single_gate_zone_line_architecture([2, 2, 2], gate_zone=1)
-    dyn_arch = DynamicArch(arch, _configuration([[0, 1], [2, 3], []]))
+    dyn_arch = SgzlDynamicArch(arch, _configuration([[0, 1], [2, 3], []]))
 
     result = SingleGateZoneLineArchRouter().route_source_to_target_config(
         dyn_arch,
@@ -124,7 +127,7 @@ def test_single_gate_zone_line_arch_router_fails_for_target_placement_outside_ga
     None
 ):
     arch = _single_gate_zone_line_architecture([2, 2, 2], gate_zone=1)
-    dyn_arch = DynamicArch(arch, _configuration([[0], [1], [2]]))
+    dyn_arch = SgzlDynamicArch(arch, _configuration([[0], [1], [2]]))
 
     with pytest.raises(
         ValueError,
@@ -144,8 +147,8 @@ def test_single_gate_zone_line_arch_router_fails_for_non_linear_architecture() -
     with pytest.raises(
         ValueError,
         match=(
-            r"SingleGateZoneLineArchRouter can only be used with linear "
-            r"architectures\."
+            r"This operation requires a SgzlDynamicArch input for a linear "
+            r"architecture with exactly one gate zone\."
         ),
     ):
         SingleGateZoneLineArchRouter().route_source_to_target_config(
@@ -161,8 +164,8 @@ def test_single_gate_zone_line_arch_router_fails_for_multiple_gate_zones() -> No
     with pytest.raises(
         ValueError,
         match=(
-            r"SingleGateZoneLineArchRouter requires an architecture with exactly "
-            r"one gate zone\."
+            r"This operation requires a SgzlDynamicArch input for a linear "
+            r"architecture with exactly one gate zone\."
         ),
     ):
         SingleGateZoneLineArchRouter().route_source_to_target_config(

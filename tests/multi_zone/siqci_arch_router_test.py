@@ -21,7 +21,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing
     SiqciArchRouter,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
-    DynamicArch,
+    SgzlDynamicArch,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     linear_8_zones,
@@ -34,7 +34,7 @@ def _empty_configuration(n_zones: int) -> TrapConfiguration:
 
 
 def test_siqci_arch_router_returns_dummy_empty_result_for_siqci_arch() -> None:
-    dyn_arch = DynamicArch(siqci_arch, _empty_configuration(siqci_arch.n_zones))
+    dyn_arch = SgzlDynamicArch(siqci_arch, _empty_configuration(siqci_arch.n_zones))
 
     result = SiqciArchRouter().route_source_to_target_config(
         dyn_arch, dyn_arch.trap_configuration.zone_placement
@@ -45,7 +45,9 @@ def test_siqci_arch_router_returns_dummy_empty_result_for_siqci_arch() -> None:
 
 
 def test_siqci_arch_router_fails_for_other_architectures() -> None:
-    dyn_arch = DynamicArch(linear_8_zones, _empty_configuration(linear_8_zones.n_zones))
+    dyn_arch = SgzlDynamicArch(
+        linear_8_zones, _empty_configuration(linear_8_zones.n_zones)
+    )
 
     with pytest.raises(
         ValueError,

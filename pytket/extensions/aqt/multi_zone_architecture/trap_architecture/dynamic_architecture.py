@@ -202,3 +202,149 @@ class DynamicArch:
 
     def pebble_hole_graph(self) -> PebbleHoleGraph:
         return PebbleHoleGraph(self._arch, self._current_config)
+
+
+class LinearDynamicArch(DynamicArch):
+    """Dynamic architecture specialization for linear macro architectures."""
+
+    def __init__(
+        self, arch: MultiZoneArchitectureSpec, configuration: TrapConfiguration
+    ):
+        super().__init__(arch, configuration)
+        if not self.is_linear_architecture:
+            raise ValueError(
+                "LinearDynamicArch can only be used with linear architectures."
+            )
+        self._line_start_zone = self._compute_line_start_zone()
+        self._linearly_ordered_zones = self._compute_linearly_ordered_zones()
+        self._ordered_zone_positions = {
+            zone: i for i, zone in enumerate(self._linearly_ordered_zones)
+        }
+
+    @classmethod
+    def from_dynamic_arch(cls, dyn_arch: DynamicArch) -> "LinearDynamicArch":
+        return cls(dyn_arch.architecture_spec, dyn_arch.trap_configuration)
+
+    def _compute_line_start_zone(self) -> int:
+        for zone in range(self.n_zones):
+            connected_zones_0, connected_zones_1 = self.connected_zones_per_port(zone)
+            if not connected_zones_0 and connected_zones_1:
+                return zone
+        raise ValueError("Could not determine the start zone of linear architecture.")
+
+    def _compute_linearly_ordered_zones(self) -> tuple[int, ...]:
+        ordered_zones = [self._line_start_zone]
+        previous_zone: int | None = None
+        current_zone = self._line_start_zone
+
+        while True:
+            next_zones = [
+                zone
+                for zone in self.connected_zones(current_zone)
+                if zone != previous_zone
+            ]
+            if not next_zones:
+                return tuple(ordered_zones)
+            if len(next_zones) > 1:
+                raise ValueError("Linear architecture contains a branching zone order.")
+            previous_zone, current_zone = current_zone, next_zones[0]
+            ordered_zones.append(current_zone)
+
+    @property
+    def line_start_zone(self) -> int:
+        return self._line_start_zone
+
+    @property
+    def linearly_ordered_zones(self) -> tuple[int, ...]:
+        return self._linearly_ordered_zones
+
+    @property
+    def ordered_zone_positions(self) -> dict[int, int]:
+        return self._ordered_zone_positions.copy()
+
+    def ordered_qubits(self) -> list[int]:
+        return [
+            qubit
+            for zone in self._linearly_ordered_zones
+            for qubit in self.trap_configuration.zone_placement[zone]
+        ]
+
+
+def require_linear_dynamic_arch(dyn_arch: DynamicArch) -> LinearDynamicArch:
+    if not isinstance(dyn_arch, LinearDynamicArch):
+        raise ValueError(
+            "This operation requires a LinearDynamicArch input for a linear architecture."
+        )
+    return dyn_arch
+
+
+class SgzlDynamicArch(LinearDynamicArch):
+    """Linear dynamic architecture specialization with exactly one gate zone."""
+
+    def __init__(
+        self, arch: MultiZoneArchitectureSpec, configuration: TrapConfiguration
+    ):
+        super().__init__(arch, configuration)
+        if len(self.gate_zones) != 1:
+            raise ValueError(
+                "SgzlDynamicArch requires a linear architecture with exactly one gate zone."
+            )
+        self._single_gate_zone = self.gate_zones[0]
+        gate_zone_position = self._ordered_zone_positions[self._single_gate_zone]
+        self._interval_capacities = (
+            sum(
+                int(self.zone_max_gate_cap[zone])
+                for zone in self._linearly_ordered_zones[:gate_zone_position]
+            ),
+            int(self.zone_max_gate_cap[self._single_gate_zone]),
+            sum(
+                int(self.zone_max_gate_cap[zone])
+                for zone in self._linearly_ordered_zones[gate_zone_position + 1 :]
+            ),
+        )
+
+    @classmethod
+    def from_linear_dynamic_arch(cls, dyn_arch: LinearDynamicArch) -> "SgzlDynamicArch":
+        return cls(dyn_arch.architecture_spec, dyn_arch.trap_configuration)
+
+    @classmethod
+    def from_dynamic_arch(cls, dyn_arch: DynamicArch) -> "SgzlDynamicArch":
+        return cls(dyn_arch.architecture_spec, dyn_arch.trap_configuration)
+
+    @property
+    def single_gate_zone(self) -> int:
+        return self._single_gate_zone
+
+    @property
+    def interval_capacities(self) -> tuple[int, int, int]:
+        return self._interval_capacities
+
+    @property
+    def left_capacity(self) -> int:
+        return self._interval_capacities[0]
+
+    @property
+    def gate_capacity(self) -> int:
+        return self._interval_capacities[1]
+
+    @property
+    def right_capacity(self) -> int:
+        return self._interval_capacities[2]
+
+    def interval_counts(self, target_gate_qubits: list[int]) -> tuple[int, int, int]:
+        qubit_positions = {qubit: i for i, qubit in enumerate(self.ordered_qubits())}
+        target_positions = sorted(
+            qubit_positions[qubit] for qubit in target_gate_qubits
+        )
+        left_count = target_positions[0]
+        interval_count = target_positions[-1] - target_positions[0] + 1
+        right_count = len(qubit_positions) - target_positions[-1] - 1
+        return left_count, interval_count, right_count
+
+
+def require_sgzl_dynamic_arch(dyn_arch: DynamicArch) -> SgzlDynamicArch:
+    if not isinstance(dyn_arch, SgzlDynamicArch):
+        raise ValueError(
+            "This operation requires a SgzlDynamicArch input for a linear architecture with exactly one gate zone."
+        )
+    return dyn_arch

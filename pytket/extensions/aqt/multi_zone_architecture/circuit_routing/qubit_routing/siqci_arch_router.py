@@ -13,12 +13,16 @@
 # limitations under the License.
 
 from ...circuit.helpers import ZonePlacement
-from ...trap_architecture.dynamic_architecture import DynamicArch
+from ...trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    SgzlDynamicArch,
+    require_sgzl_dynamic_arch,
+)
 from ...trap_architecture.named_architectures import siqci_arch
 from .router import Router, RoutingResult
 
 
-def _validate_siqci_architecture(dyn_arch: DynamicArch) -> None:
+def _validate_siqci_architecture(dyn_arch: SgzlDynamicArch) -> None:
     if dyn_arch.architecture_spec != siqci_arch:
         raise ValueError(
             "SiqciArchRouter can only be used with the siqci_arch architecture."
@@ -29,7 +33,10 @@ class SiqciArchRouter(Router):
     """Temporary router specialized to the siqci_arch architecture."""
 
     def route_source_to_target_config(
-        self, dyn_arch: DynamicArch, target_placement: ZonePlacement
+        self,
+        dyn_arch: DynamicArch,
+        target_placement: ZonePlacement,
     ) -> RoutingResult:
-        _validate_siqci_architecture(dyn_arch)
+        sgzl_dyn_arch = require_sgzl_dynamic_arch(dyn_arch)
+        _validate_siqci_architecture(sgzl_dyn_arch)
         return RoutingResult(cost_estimate=0, routing_ops=[])

@@ -15,12 +15,15 @@
 from dataclasses import dataclass
 
 from ...circuit.helpers import ZonePlacement
-from ...trap_architecture.dynamic_architecture import DynamicArch
+from ...trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    SgzlDynamicArch,
+    require_sgzl_dynamic_arch,
+)
 from ..routing_ops import RoutingBarrier, RoutingOp
 from .line_arch_router import (
     execute_adjacent_swap_in_workspace,
     execute_swap_free_segmentation,
-    linearly_ordered_zones,
     ordered_qubits,
     swap_free_routing_segmentation,
 )
@@ -71,22 +74,10 @@ def _append_routing_ops(
     accumulated_ops.extend(new_ops)
 
 
-def _single_gate_zone(dyn_arch: DynamicArch) -> int:
-    if not dyn_arch.is_linear_architecture:
-        raise ValueError(
-            "SingleGateZoneLineArchRouter can only be used with linear architectures."
-        )
-    if len(dyn_arch.gate_zones) != 1:
-        raise ValueError(
-            "SingleGateZoneLineArchRouter requires an architecture with exactly one gate zone."
-        )
-    return dyn_arch.gate_zones[0]
-
-
 def _validate_target_placement(
-    dyn_arch: DynamicArch, target_placement: ZonePlacement
+    dyn_arch: SgzlDynamicArch, target_placement: ZonePlacement
 ) -> tuple[int, list[int]]:
-    gate_zone = _single_gate_zone(dyn_arch)
+    gate_zone = dyn_arch.single_gate_zone
     for zone, zone_qubits in enumerate(target_placement):
         if zone != gate_zone and zone_qubits:
             raise ValueError(
@@ -100,61 +91,27 @@ def _validate_target_placement(
     return gate_zone, target_gate_qubits
 
 
-def _single_gate_zone_capacities(
-    dyn_arch: DynamicArch, gate_zone: int
-) -> tuple[int, int, int]:
-    ordered_zones = linearly_ordered_zones(dyn_arch)
-    gate_zone_position = ordered_zones.index(gate_zone)
-    left_capacity = sum(
-        int(dyn_arch.zone_max_gate_cap[zone])
-        for zone in ordered_zones[:gate_zone_position]
-    )
-    gate_capacity = int(dyn_arch.zone_max_gate_cap[gate_zone])
-    right_capacity = sum(
-        int(dyn_arch.zone_max_gate_cap[zone])
-        for zone in ordered_zones[gate_zone_position + 1 :]
-    )
-    return left_capacity, gate_capacity, right_capacity
-
-
-def _interval_counts(
-    current_order: list[int], target_gate_qubits: list[int]
-) -> tuple[int, int, int]:
-    qubit_positions = {qubit: i for i, qubit in enumerate(current_order)}
-    target_positions = sorted(qubit_positions[qubit] for qubit in target_gate_qubits)
-    left_count = target_positions[0]
-    interval_count = target_positions[-1] - target_positions[0] + 1
-    right_count = len(current_order) - target_positions[-1] - 1
-    return left_count, interval_count, right_count
-
-
 def _swap_free_single_gate_zone_possible(
-    dyn_arch: DynamicArch, target_gate_qubits: list[int], gate_zone: int
+    dyn_arch: SgzlDynamicArch, target_gate_qubits: list[int]
 ) -> bool:
     if not target_gate_qubits:
         return True
-    left_count, interval_count, right_count = _interval_counts(
-        ordered_qubits(dyn_arch), target_gate_qubits
-    )
-    left_capacity, gate_capacity, right_capacity = _single_gate_zone_capacities(
-        dyn_arch, gate_zone
+    left_count, interval_count, right_count = dyn_arch.interval_counts(
+        target_gate_qubits
     )
     return (
-        interval_count <= gate_capacity
-        and left_count <= left_capacity
-        and right_count <= right_capacity
+        interval_count <= dyn_arch.gate_capacity
+        and left_count <= dyn_arch.left_capacity
+        and right_count <= dyn_arch.right_capacity
     )
 
 
 def _class_assignment_target_order(
-    dyn_arch: DynamicArch,
-    gate_zone: int,
+    dyn_arch: SgzlDynamicArch,
     target_gate_qubits: list[int],
 ) -> list[int]:
     current_order = ordered_qubits(dyn_arch)
-    left_capacity, gate_capacity, right_capacity = _single_gate_zone_capacities(
-        dyn_arch, gate_zone
-    )
+    left_capacity, gate_capacity, right_capacity = dyn_arch.interval_capacities
     target_qubit_set = set(target_gate_qubits)
     n_qubits = len(current_order)
     total_capacity = left_capacity + gate_capacity + right_capacity
@@ -361,10 +318,10 @@ def _adjacent_swap_sequence(
 
 
 def _workspace_candidate_zones(
-    dyn_arch: DynamicArch, left_qubit: int, right_qubit: int
+    dyn_arch: SgzlDynamicArch, left_qubit: int, right_qubit: int
 ) -> list[int]:
-    ordered_zones = linearly_ordered_zones(dyn_arch)
-    ordered_zone_positions = {zone: i for i, zone in enumerate(ordered_zones)}
+    ordered_zones = list(dyn_arch.linearly_ordered_zones)
+    ordered_zone_positions = dyn_arch.ordered_zone_positions
     left_zone = int(dyn_arch.qubit_to_zone_pos[left_qubit][0])
     right_zone = int(dyn_arch.qubit_to_zone_pos[right_qubit][0])
     midpoint = (
@@ -381,7 +338,7 @@ def _workspace_candidate_zones(
 
 
 def _execute_adjacent_swap_sequence(
-    dyn_arch: DynamicArch, swap_sequence: list[tuple[int, int]]
+    dyn_arch: SgzlDynamicArch, swap_sequence: list[tuple[int, int]]
 ) -> RoutingResult:
     routing_ops: list[RoutingOp] = []
     total_cost = 0.0
@@ -409,36 +366,41 @@ class SingleGateZoneLineArchRouter(Router):
     """Router specialized for linear architectures with a single gate zone."""
 
     def route_source_to_target_config(
-        self, dyn_arch: DynamicArch, target_placement: ZonePlacement
+        self,
+        dyn_arch: DynamicArch,
+        target_placement: ZonePlacement,
     ) -> RoutingResult:
-        gate_zone, target_gate_qubits = _validate_target_placement(
-            dyn_arch, target_placement
+        sgzl_dyn_arch = require_sgzl_dynamic_arch(dyn_arch)
+        _, target_gate_qubits = _validate_target_placement(
+            sgzl_dyn_arch, target_placement
         )
         if not target_gate_qubits:
             return RoutingResult(cost_estimate=0, routing_ops=[])
 
-        if _swap_free_single_gate_zone_possible(
-            dyn_arch, target_gate_qubits, gate_zone
-        ):
-            segmentation = swap_free_routing_segmentation(dyn_arch, target_placement)
+        if _swap_free_single_gate_zone_possible(sgzl_dyn_arch, target_gate_qubits):
+            segmentation = swap_free_routing_segmentation(
+                sgzl_dyn_arch, target_placement
+            )
             if segmentation is None:
                 raise ValueError(
                     "SingleGateZoneLineArchRouter expected a swap-free segmentation but none was found."
                 )
-            return execute_swap_free_segmentation(dyn_arch, segmentation)
+            return execute_swap_free_segmentation(sgzl_dyn_arch, segmentation)
 
-        target_order = _class_assignment_target_order(
-            dyn_arch, gate_zone, target_gate_qubits
+        target_order = _class_assignment_target_order(sgzl_dyn_arch, target_gate_qubits)
+        swap_sequence = _adjacent_swap_sequence(
+            ordered_qubits(sgzl_dyn_arch), target_order
         )
-        swap_sequence = _adjacent_swap_sequence(ordered_qubits(dyn_arch), target_order)
-        swap_result = _execute_adjacent_swap_sequence(dyn_arch, swap_sequence)
+        swap_result = _execute_adjacent_swap_sequence(sgzl_dyn_arch, swap_sequence)
 
-        final_segmentation = swap_free_routing_segmentation(dyn_arch, target_placement)
+        final_segmentation = swap_free_routing_segmentation(
+            sgzl_dyn_arch, target_placement
+        )
         if final_segmentation is None:
             raise ValueError(
                 "SingleGateZoneLineArchRouter could not reach a swap-free state after applying the planned adjacent swaps."
             )
-        final_result = execute_swap_free_segmentation(dyn_arch, final_segmentation)
+        final_result = execute_swap_free_segmentation(sgzl_dyn_arch, final_segmentation)
         total_cost = swap_result.cost_estimate + final_result.cost_estimate
         routing_ops = swap_result.routing_ops.copy()
         _append_routing_ops(routing_ops, final_result.routing_ops)

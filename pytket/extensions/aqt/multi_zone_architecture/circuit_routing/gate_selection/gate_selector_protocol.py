@@ -23,7 +23,9 @@ class GateSelector(Protocol):
     """A class protocol for calculating the optimal placement of ions in zones to implement upcoming gates"""
 
     def next_config(
-        self, dyn_arch: DynamicArch, remaining_commands: list[Command]
+        self,
+        dyn_arch: DynamicArch,
+        remaining_commands: list[Command],
     ) -> ZonePlacement: ...
 
     """Returns the optimal placement of qubits in zones (no ordering within zones)"""

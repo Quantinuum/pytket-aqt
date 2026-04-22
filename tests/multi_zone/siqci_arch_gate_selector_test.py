@@ -21,7 +21,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selectio
     SiqciArchGateSelector,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
-    DynamicArch,
+    SgzlDynamicArch,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     linear_8_zones,
@@ -45,7 +45,7 @@ def test_siqci_arch_gate_selector_only_places_gate_qubits() -> None:
 
 
 def test_siqci_arch_gate_selector_returns_dummy_empty_target_for_siqci_arch() -> None:
-    dyn_arch = DynamicArch(siqci_arch, _configuration([[], [], [], [0, 1], []]))
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[], [], [], [0, 1], []]))
 
     target_config = SiqciArchGateSelector().next_config(dyn_arch, [])
 
@@ -53,7 +53,7 @@ def test_siqci_arch_gate_selector_returns_dummy_empty_target_for_siqci_arch() ->
 
 
 def test_siqci_arch_gate_selector_requires_gate_zone_to_be_fully_occupied() -> None:
-    dyn_arch = DynamicArch(siqci_arch, _configuration([[], [], [], [0], []]))
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[], [], [], [0], []]))
 
     with pytest.raises(
         ValueError,
@@ -66,7 +66,9 @@ def test_siqci_arch_gate_selector_requires_gate_zone_to_be_fully_occupied() -> N
 
 
 def test_siqci_arch_gate_selector_fails_for_other_architectures() -> None:
-    dyn_arch = DynamicArch(linear_8_zones, _empty_configuration(linear_8_zones.n_zones))
+    dyn_arch = SgzlDynamicArch(
+        linear_8_zones, _empty_configuration(linear_8_zones.n_zones)
+    )
 
     with pytest.raises(
         ValueError,

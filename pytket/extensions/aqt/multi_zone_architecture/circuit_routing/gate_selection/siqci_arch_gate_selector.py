@@ -16,12 +16,16 @@ from pytket.circuit import Command
 
 from ...circuit.helpers import ZonePlacement
 from ...depth_list.depth_list import DepthInfo, depth_info_from_command_list
-from ...trap_architecture.dynamic_architecture import DynamicArch
+from ...trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    SgzlDynamicArch,
+    require_sgzl_dynamic_arch,
+)
 from ...trap_architecture.named_architectures import siqci_arch
 from .gate_selector_protocol import GateSelector
 
 
-def _validate_siqci_architecture(dyn_arch: DynamicArch) -> None:
+def _validate_siqci_architecture(dyn_arch: SgzlDynamicArch) -> None:
     if dyn_arch.architecture_spec != siqci_arch:
         raise ValueError(
             "SiqciArchGateSelector can only be used with the siqci_arch architecture."
@@ -35,12 +39,15 @@ def _validate_siqci_architecture(dyn_arch: DynamicArch) -> None:
         )
 
 
-def handle_2qb_gates_remaining(dyn_arch: DynamicArch, depth_info: DepthInfo):
+def handle_2qb_gates_remaining(dyn_arch: SgzlDynamicArch, depth_info: DepthInfo):
+    # The specialized pair-selection logic is still under construction.
+    # For now this selector only validates that the state matches the
+    # siqci gating-phase assumptions, then returns a dummy placement.
     return [[] for _ in range(dyn_arch.n_zones)]
 
 
 def handle_only_single_qubit_gates_remaining(
-    dyn_arch: DynamicArch, remaining_commands: list[Command]
+    dyn_arch: SgzlDynamicArch, remaining_commands: list[Command]
 ):
     return [[] for _ in range(dyn_arch.n_zones)]
 
@@ -52,16 +59,19 @@ class SiqciArchGateSelector(GateSelector):
         return True
 
     def next_config(
-        self, dyn_arch: DynamicArch, remaining_commands: list[Command]
+        self,
+        dyn_arch: DynamicArch,
+        remaining_commands: list[Command],
     ) -> ZonePlacement:
-        _validate_siqci_architecture(dyn_arch)
-        current_configuration = dyn_arch.trap_configuration
+        sgzl_dyn_arch = require_sgzl_dynamic_arch(dyn_arch)
+        _validate_siqci_architecture(sgzl_dyn_arch)
+        current_configuration = sgzl_dyn_arch.trap_configuration
         n_qubits = current_configuration.n_qubits
         depth_info = depth_info_from_command_list(n_qubits, remaining_commands)
         if depth_info.depth_list:
-            placement = handle_2qb_gates_remaining(dyn_arch, depth_info)
+            placement = handle_2qb_gates_remaining(sgzl_dyn_arch, depth_info)
         else:
             placement = handle_only_single_qubit_gates_remaining(
-                dyn_arch, remaining_commands
+                sgzl_dyn_arch, remaining_commands
             )
         return placement

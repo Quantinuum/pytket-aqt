@@ -17,7 +17,11 @@ from itertools import count, pairwise
 
 from ...circuit.helpers import ZonePlacement
 from ...trap_architecture.architecture import PortId
-from ...trap_architecture.dynamic_architecture import DynamicArch
+from ...trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    LinearDynamicArch,
+    require_linear_dynamic_arch,
+)
 from ..routing_ops import PSwap, RoutingBarrier, RoutingOp, Shuttle
 from .router import Router, RoutingResult
 
@@ -78,7 +82,7 @@ class _SearchState:
 
 
 def target_zone_interval_qubits(
-    dyn_arch: DynamicArch,
+    dyn_arch: LinearDynamicArch,
     target_placement: ZonePlacement,
 ) -> list[list[int]]:
     current_qubit_order = ordered_qubits(dyn_arch)
@@ -99,17 +103,13 @@ def target_zone_interval_qubits(
     return target_interval_qubits
 
 
-def ordered_qubits(dyn_arch: DynamicArch) -> list[int]:
-    return [
-        qubit
-        for zone in linearly_ordered_zones(dyn_arch)
-        for qubit in dyn_arch.trap_configuration.zone_placement[zone]
-    ]
+def ordered_qubits(dyn_arch: LinearDynamicArch) -> list[int]:
+    return dyn_arch.ordered_qubits()
 
 
-def _line_arch_context(dyn_arch: DynamicArch) -> _LineArchContext:
-    ordered_zones = tuple(linearly_ordered_zones(dyn_arch))
-    ordered_zone_positions = {zone: i for i, zone in enumerate(ordered_zones)}
+def _line_arch_context(dyn_arch: LinearDynamicArch) -> _LineArchContext:
+    ordered_zones = dyn_arch.linearly_ordered_zones
+    ordered_zone_positions = dyn_arch.ordered_zone_positions
     boundary_ports = tuple(
         (
             PortId(src_port_value),
@@ -158,7 +158,7 @@ def _ordered_qubits_state(
 
 
 def analyze_swap_free_routing(
-    dyn_arch: DynamicArch,
+    dyn_arch: LinearDynamicArch,
     target_placement: ZonePlacement,
     fixed_block_sizes: dict[int, int] | None = None,
 ) -> SwapFreeRoutingAnalysis:
@@ -1230,31 +1230,12 @@ def _first_failure_witness(
     return SwapFreeFailureWitness(kind="unknown", ordered_zones=ordered_zones)
 
 
-def linearly_ordered_zones(dyn_arch: DynamicArch) -> list[int]:
-    ordered_zones = [line_start_zone(dyn_arch)]
-    previous_zone: int | None = None
-    current_zone = ordered_zones[0]
-
-    while True:
-        next_zones = [
-            zone
-            for zone in dyn_arch.connected_zones(current_zone)
-            if zone != previous_zone
-        ]
-        if not next_zones:
-            return ordered_zones
-        if len(next_zones) > 1:
-            raise ValueError("Linear architecture contains a branching zone order.")
-        previous_zone, current_zone = current_zone, next_zones[0]
-        ordered_zones.append(current_zone)
+def linearly_ordered_zones(dyn_arch: LinearDynamicArch) -> list[int]:
+    return list(dyn_arch.linearly_ordered_zones)
 
 
-def line_start_zone(dyn_arch: DynamicArch) -> int:
-    for zone in range(dyn_arch.n_zones):
-        connected_zones_0, connected_zones_1 = dyn_arch.connected_zones_per_port(zone)
-        if not connected_zones_0 and connected_zones_1:
-            return zone
-    raise ValueError("Could not determine the start zone of linear architecture.")
+def line_start_zone(dyn_arch: LinearDynamicArch) -> int:
+    return dyn_arch.line_start_zone
 
 
 class LineArchRouter(Router):
@@ -1263,15 +1244,12 @@ class LineArchRouter(Router):
     def route_source_to_target_config(
         self, dyn_arch: DynamicArch, target_placement: ZonePlacement
     ) -> RoutingResult:
-        if not dyn_arch.is_linear_architecture:
-            raise ValueError(
-                "LineArchRouter can only be used with linear architectures."
-            )
-        target_zone_interval_qubits(dyn_arch, target_placement)
-        context = _line_arch_context(dyn_arch)
+        linear_dyn_arch = require_linear_dynamic_arch(dyn_arch)
+        target_zone_interval_qubits(linear_dyn_arch, target_placement)
+        context = _line_arch_context(linear_dyn_arch)
         solution = _search_routing_solution(
             context,
-            _abstract_state_from_dyn_arch(dyn_arch),
+            _abstract_state_from_dyn_arch(linear_dyn_arch),
             target_placement,
         )
         if solution is None:
@@ -1285,18 +1263,18 @@ class LineArchRouter(Router):
             solution
         ):
             repair_result = execute_adjacent_swap_in_workspace(
-                dyn_arch, left_qubit, right_qubit, workspace_zone
+                linear_dyn_arch, left_qubit, right_qubit, workspace_zone
             )
             total_cost += repair_result.cost_estimate
             _append_routing_ops(routing_ops, repair_result.routing_ops)
 
-        final_analysis = analyze_swap_free_routing(dyn_arch, target_placement)
+        final_analysis = analyze_swap_free_routing(linear_dyn_arch, target_placement)
         if final_analysis.segmentation is None:
             raise ValueError(
                 "LineArchRouter replay did not reproduce a swap-free state for the final target placement."
             )
         final_result = execute_swap_free_segmentation(
-            dyn_arch, final_analysis.segmentation
+            linear_dyn_arch, final_analysis.segmentation
         )
         total_cost += final_result.cost_estimate
         _append_routing_ops(routing_ops, final_result.routing_ops)
