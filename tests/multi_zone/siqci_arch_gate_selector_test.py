@@ -33,16 +33,36 @@ def _empty_configuration(n_zones: int) -> TrapConfiguration:
     return TrapConfiguration(n_qubits=0, zone_placement=[[] for _ in range(n_zones)])
 
 
+def _configuration(zone_placement: list[list[int]]) -> TrapConfiguration:
+    return TrapConfiguration(
+        n_qubits=sum(len(zone_qubits) for zone_qubits in zone_placement),
+        zone_placement=zone_placement,
+    )
+
+
 def test_siqci_arch_gate_selector_only_places_gate_qubits() -> None:
     assert SiqciArchGateSelector().only_places_gate_qubits()
 
 
 def test_siqci_arch_gate_selector_returns_dummy_empty_target_for_siqci_arch() -> None:
-    dyn_arch = DynamicArch(siqci_arch, _empty_configuration(siqci_arch.n_zones))
+    dyn_arch = DynamicArch(siqci_arch, _configuration([[], [], [], [0, 1], []]))
 
     target_config = SiqciArchGateSelector().next_config(dyn_arch, [])
 
     assert target_config == [[] for _ in range(siqci_arch.n_zones)]
+
+
+def test_siqci_arch_gate_selector_requires_gate_zone_to_be_fully_occupied() -> None:
+    dyn_arch = DynamicArch(siqci_arch, _configuration([[], [], [], [0], []]))
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"SiqciArchGateSelector requires the gate zone to be fully occupied "
+            r"when selecting the next configuration\."
+        ),
+    ):
+        SiqciArchGateSelector().next_config(dyn_arch, [])
 
 
 def test_siqci_arch_gate_selector_fails_for_other_architectures() -> None:
