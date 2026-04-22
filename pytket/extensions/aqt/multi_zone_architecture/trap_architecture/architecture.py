@@ -94,6 +94,13 @@ class MultiZoneArchitectureSpec(BaseModel):
     zones: list[Zone]
     connections: list[ZoneConnection]
 
+    @model_validator(mode="after")
+    def set_and_validate(self) -> Self:
+        if self.n_zones != len(self.zones):
+            raise ValueError(
+                f"Multi-zone architecture defined to have {self.n_zones} zones, but {len(self.zones)} zones were defined."
+            )
+
     def get_zone_max_ions_gates(self, zone_index: int) -> int:
         zone = self.zones[zone_index]
         return zone.max_ions_gate_op

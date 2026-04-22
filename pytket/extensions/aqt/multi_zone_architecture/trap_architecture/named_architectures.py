@@ -47,6 +47,28 @@ four_zones_in_a_line = MultiZoneArchitectureSpec(
     ],
 )
 
+_LINEAR_5_ZONES_GATE_ZONE = 3
+
+linear_5_zones = MultiZoneArchitectureSpec(
+    n_qubits_max=6,
+    n_zones=5,
+    zones=[
+        Zone(
+            max_ions_gate_op=2,
+            max_ions_transport_op=3,
+            memory_only=i != _LINEAR_5_ZONES_GATE_ZONE,
+        )
+        for i in range(5)
+    ],
+    connections=[
+        ZoneConnection(
+            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
+            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
+        )
+        for i in range(4)
+    ],
+)
+
 _LINEAR_8_ZONES_GATE_ZONE = 3
 
 linear_8_zones = MultiZoneArchitectureSpec(
