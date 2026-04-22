@@ -26,7 +26,7 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architectur
     MultiZoneArchitectureSpec,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
-    linear_5_zones,
+    siqci_arch,
 )
 
 
@@ -68,7 +68,7 @@ def _routed_non_linear_visualizer_circuit(
 def test_visualizer_handles_routed_linear_architectures(
     tmp_path: Path,
 ) -> None:
-    circuit = _routed_non_linear_visualizer_circuit(linear_5_zones)
+    circuit = _routed_non_linear_visualizer_circuit(siqci_arch)
     output_path = tmp_path / "movie.html"
     write_multi_zone_circuit_movie_html(
         circuit,
