@@ -180,6 +180,9 @@ class SingleGateZoneLineArchGateSelector(GateSelector):
 
     """
 
+    def only_places_gate_qubits(self) -> bool:
+        return True
+
     def next_config(
         self, dyn_arch: DynamicArch, remaining_commands: list[Command]
     ) -> ZonePlacement:
