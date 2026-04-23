@@ -10,7 +10,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selectio
     SiqciArchGateSelector,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
-    SingleGateZoneLineArchRouter,
+    SiqciArchRouter,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_config import (
     RoutingConfig,
@@ -57,7 +57,7 @@ def _routed_non_linear_visualizer_circuit(
             manual_placement=[[2], [3], [], [0, 1], [4]],
         ),
         routing=RoutingConfig(
-            router=SingleGateZoneLineArchRouter(),
+            router=SiqciArchRouter(),
             gate_selector=SiqciArchGateSelector(),
         ),
     )

@@ -20,6 +20,10 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit.helpers import (
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
     SiqciArchRouter,
 )
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_ops import (
+    RoutingBarrier,
+    Shuttle,
+)
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
 )
@@ -44,6 +48,38 @@ def test_siqci_arch_router_returns_dummy_empty_result_for_siqci_arch() -> None:
     assert result.routing_ops == []
 
 
+def test_siqci_arch_router_returns_empty_when_target_pair_already_in_gate_zone() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(
+        siqci_arch, TrapConfiguration(2, [[], [], [], [0, 1], []])
+    )
+
+    result = SiqciArchRouter().route_source_to_target_config(
+        dyn_arch, [[], [], [], [0, 1], []]
+    )
+
+    assert result.cost_estimate == 0
+    assert result.routing_ops == []
+
+
+def test_siqci_arch_router_routes_pair_into_gate_zone_without_pswaps_when_unnecessary() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(
+        siqci_arch, TrapConfiguration(4, [[0], [1], [], [2, 3], []])
+    )
+
+    result = SiqciArchRouter().route_source_to_target_config(
+        dyn_arch, [[], [], [], [0, 1], []]
+    )
+
+    assert dyn_arch.trap_configuration.zone_placement == [[], [], [], [0, 1], [2, 3]]
+    assert all(isinstance(op, (RoutingBarrier, Shuttle)) for op in result.routing_ops)
+    assert sum(isinstance(op, Shuttle) for op in result.routing_ops) == 4
+    assert result.cost_estimate == pytest.approx(4.8)
+
+
 def test_siqci_arch_router_fails_for_other_architectures() -> None:
     dyn_arch = SgzlDynamicArch(
         linear_8_zones, _empty_configuration(linear_8_zones.n_zones)
@@ -55,4 +91,21 @@ def test_siqci_arch_router_fails_for_other_architectures() -> None:
     ):
         SiqciArchRouter().route_source_to_target_config(
             dyn_arch, dyn_arch.trap_configuration.zone_placement
+        )
+
+
+def test_siqci_arch_router_rejects_target_qubits_outside_gate_zone() -> None:
+    dyn_arch = SgzlDynamicArch(
+        siqci_arch, TrapConfiguration(2, [[], [], [], [0, 1], []])
+    )
+
+    with pytest.raises(
+        ValueError,
+        match=(
+            r"SiqciArchRouter requires target placements to specify qubits only "
+            r"in the gate zone\."
+        ),
+    ):
+        SiqciArchRouter().route_source_to_target_config(
+            dyn_arch, [[0], [], [], [1], []]
         )
