@@ -68,6 +68,48 @@ siqci_arch = MultiZoneArchitectureSpec(
     ],
 )
 
+_SIQCI_GATE_ZONE_MIDDLE = 2
+siqci_arch_g2 = MultiZoneArchitectureSpec(
+    n_qubits_max=5,
+    n_zones=5,
+    zones=[
+        Zone(
+            max_ions_gate_op=2,
+            max_ions_transport_op=2,
+            memory_only=i != _SIQCI_GATE_ZONE_MIDDLE,
+        )
+        for i in range(5)
+    ],
+    connections=[
+        ZoneConnection(
+            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
+            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
+        )
+        for i in range(4)
+    ],
+)
+
+_SIQCI_GATE_ZONE_EDGE = 4
+siqci_arch_g4 = MultiZoneArchitectureSpec(
+    n_qubits_max=5,
+    n_zones=5,
+    zones=[
+        Zone(
+            max_ions_gate_op=2,
+            max_ions_transport_op=2,
+            memory_only=i != _SIQCI_GATE_ZONE_EDGE,
+        )
+        for i in range(5)
+    ],
+    connections=[
+        ZoneConnection(
+            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
+            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
+        )
+        for i in range(4)
+    ],
+)
+
 _LINEAR_8_ZONES_GATE_ZONE = 3
 
 linear_8_zones = MultiZoneArchitectureSpec(

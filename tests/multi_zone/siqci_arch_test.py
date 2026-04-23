@@ -1,5 +1,7 @@
 from pathlib import Path
 
+import pytest
+
 from pytket import Circuit
 from pytket.extensions.aqt.backends.aqt_multi_zone import AQTMultiZoneBackend
 from pytket.extensions.aqt.multi_zone_architecture.circuit import (
@@ -27,6 +29,8 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architectur
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     siqci_arch,
+    siqci_arch_g2,
+    siqci_arch_g4,
 )
 
 
@@ -47,6 +51,7 @@ def build_test_circuit(n_qubits: int) -> Circuit:
 
 def _routed_non_linear_visualizer_circuit(
     architecture: MultiZoneArchitectureSpec,
+    manual_placement: list[list[int]],
 ) -> MultiZoneCircuit:
     backend = AQTMultiZoneBackend(architecture=architecture, access_token="invalid")
     compilation_settings = CompilationSettings(
@@ -54,7 +59,7 @@ def _routed_non_linear_visualizer_circuit(
         initial_placement=InitialPlacementSettings(
             algorithm=InitialPlacementAlg.manual,
             zone_free_space=0,
-            manual_placement=[[2], [3], [], [0, 1], [4]],
+            manual_placement=manual_placement,
         ),
         routing=RoutingConfig(
             router=SiqciArchRouter(),
@@ -66,10 +71,20 @@ def _routed_non_linear_visualizer_circuit(
     return backend.route_compiled(compiled, compilation_settings)
 
 
-def test_visualizer_handles_routed_linear_architectures(
+@pytest.mark.parametrize(
+    ("arch", "manual_placement"),
+    [
+        (siqci_arch, [[2], [3], [], [0, 1], [4]]),
+        (siqci_arch_g2, [[2], [3], [0, 1], [], [4]]),
+        (siqci_arch_g4, [[2], [3], [4], [], [0, 1]]),
+    ],
+)
+def test_siqci_arches(
+    arch: MultiZoneArchitectureSpec,
+    manual_placement: list[list[int]],
     tmp_path: Path,
 ) -> None:
-    circuit = _routed_non_linear_visualizer_circuit(siqci_arch)
+    circuit = _routed_non_linear_visualizer_circuit(arch, manual_placement)
     output_path = tmp_path / "movie.html"
     write_multi_zone_circuit_movie_html(
         circuit,

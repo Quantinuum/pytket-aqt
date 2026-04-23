@@ -25,16 +25,33 @@ from ...trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
     require_sgzl_dynamic_arch,
 )
-from ...trap_architecture.named_architectures import siqci_arch
 from .gate_selector_protocol import GateSelector
 
 _PAIRED_ZONE_OCCUPANCY = 2
+_SIQCI_N_ZONES = 5
+_SIQCI_N_QUBITS_MAX = 5
+
+
+def _is_siqci_like_architecture(dyn_arch: SgzlDynamicArch) -> bool:
+    return (
+        dyn_arch.n_zones == _SIQCI_N_ZONES
+        and dyn_arch.architecture_spec.n_qubits_max == _SIQCI_N_QUBITS_MAX
+        and dyn_arch.gate_capacity == _PAIRED_ZONE_OCCUPANCY
+        and all(
+            capacity == _PAIRED_ZONE_OCCUPANCY
+            for capacity in dyn_arch.zone_max_gate_cap
+        )
+        and all(
+            capacity == _PAIRED_ZONE_OCCUPANCY
+            for capacity in dyn_arch.zone_max_transport_cap
+        )
+    )
 
 
 def _validate_siqci_architecture(dyn_arch: SgzlDynamicArch) -> None:
-    if dyn_arch.architecture_spec != siqci_arch:
+    if not _is_siqci_like_architecture(dyn_arch):
         raise ValueError(
-            "SiqciArchGateSelector can only be used with the siqci_arch architecture."
+            "SiqciArchGateSelector can only be used with siqci-like linear architectures with one gate zone and capacity-2 zones."
         )
     gate_zone = dyn_arch.gate_zones[0]
     gate_zone_occupancy = len(dyn_arch.trap_configuration.zone_placement[gate_zone])
@@ -104,8 +121,8 @@ def _single_qubit_gate_qubits(remaining_commands: list[Command]) -> list[int]:
     )
 
 
-def _best_pair_from_candidates(
-    dyn_arch: SgzlDynamicArch, candidate_pairs: list[list[int]]
+def _best_block_from_candidates(
+    dyn_arch: SgzlDynamicArch, candidate_blocks: list[list[int]]
 ) -> list[int]:
     largest_swap_free_list: list[int] = []
     smallest_interval_list: list[int] = []
@@ -113,14 +130,20 @@ def _best_pair_from_candidates(
 
     # Normalising and sorting candidate pairs means that when several pairs are
     # equally good, we always choose the same one.
-    for pair in sorted((sorted(pair) for pair in candidate_pairs), key=tuple):
+    for block in sorted((sorted(block) for block in candidate_blocks), key=tuple):
         swap_free, interval_length = _swap_free_single_gate_zone_possible(
-            dyn_arch, pair
+            dyn_arch, block
         )
-        if swap_free and not largest_swap_free_list:
-            largest_swap_free_list = pair
+        if swap_free and (
+            len(block) > len(largest_swap_free_list)
+            or (
+                len(block) == len(largest_swap_free_list)
+                and block < largest_swap_free_list
+            )
+        ):
+            largest_swap_free_list = block
         if interval_length < current_interval_count:
-            smallest_interval_list = pair
+            smallest_interval_list = block
             current_interval_count = interval_length
 
     return largest_swap_free_list or smallest_interval_list
@@ -170,7 +193,7 @@ def _pair_single_remaining_gate_qubit(
         if len(neighbour_qubits) == 1:
             adjacent_candidate_pairs.append([target_qubit, neighbour_qubits[0]])
 
-    best_adjacent_pair = _best_pair_from_candidates(dyn_arch, adjacent_candidate_pairs)
+    best_adjacent_pair = _best_block_from_candidates(dyn_arch, adjacent_candidate_pairs)
     if best_adjacent_pair:
         swap_free, _ = _swap_free_single_gate_zone_possible(
             dyn_arch, best_adjacent_pair
@@ -190,14 +213,28 @@ def handle_only_single_qubit_gates_remaining(
         return target_placement
 
     if len(qubits_with_gates) == 1:
-        target_placement[dyn_arch.single_gate_zone] = _pair_single_remaining_gate_qubit(
-            dyn_arch, qubits_with_gates[0]
-        )
+        # When only one qubit still has gates left, let the router choose the
+        # cheapest partner that gets this qubit into the gate zone legally.
+        target_placement[dyn_arch.single_gate_zone] = [qubits_with_gates[0]]
         return target_placement
 
-    target_placement[dyn_arch.single_gate_zone] = _best_pair_from_candidates(
-        dyn_arch, [list(pair) for pair in combinations(qubits_with_gates, 2)]
-    )
+    pair_candidates = [list(pair) for pair in combinations(qubits_with_gates, 2)]
+    best_pair = _best_block_from_candidates(dyn_arch, pair_candidates)
+    if best_pair and len(best_pair) == _PAIRED_ZONE_OCCUPANCY:
+        swap_free, _ = _swap_free_single_gate_zone_possible(dyn_arch, best_pair)
+        if swap_free:
+            target_placement[dyn_arch.single_gate_zone] = best_pair
+            return target_placement
+
+    singleton_candidates = [[qubit] for qubit in qubits_with_gates]
+    best_singleton = _best_block_from_candidates(dyn_arch, singleton_candidates)
+    if best_singleton:
+        swap_free, _ = _swap_free_single_gate_zone_possible(dyn_arch, best_singleton)
+        if swap_free:
+            target_placement[dyn_arch.single_gate_zone] = best_singleton
+            return target_placement
+
+    target_placement[dyn_arch.single_gate_zone] = best_pair
     return target_placement
 
 

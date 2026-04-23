@@ -23,16 +23,19 @@ from ...trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
     require_sgzl_dynamic_arch,
 )
-from ...trap_architecture.named_architectures import siqci_arch
 from ..routing_ops import PSwap, RoutingBarrier, RoutingOp, Shuttle
 from .router import Router, RoutingResult
 
 _PAIRED_ZONE_OCCUPANCY = 2
 _INTERNAL_ZONE_MIN_INDEX = 1
+_SIQCI_N_ZONES = 5
+_SIQCI_N_QUBITS_MAX = 5
 
 
 @dataclass(frozen=True)
 class _SiqciPswapAction:
+    """A legal siqci physical swap in a doubly occupied zone."""
+
     zone: int
     qubit0: int
     qubit1: int
@@ -41,6 +44,8 @@ class _SiqciPswapAction:
 
 @dataclass(frozen=True)
 class _SiqciShuttleAction:
+    """A legal siqci shuttle between adjacent zones."""
+
     qubits: tuple[int, ...]
     src_zone: int
     targ_zone: int
@@ -56,15 +61,34 @@ class _RouteStep:
 
 
 def _validate_siqci_architecture(dyn_arch: SgzlDynamicArch) -> None:
-    if dyn_arch.architecture_spec != siqci_arch:
+    if (
+        dyn_arch.n_zones != _SIQCI_N_ZONES
+        or dyn_arch.architecture_spec.n_qubits_max != _SIQCI_N_QUBITS_MAX
+        or dyn_arch.gate_capacity != _PAIRED_ZONE_OCCUPANCY
+        or any(
+            capacity != _PAIRED_ZONE_OCCUPANCY
+            for capacity in dyn_arch.zone_max_gate_cap
+        )
+        or any(
+            capacity != _PAIRED_ZONE_OCCUPANCY
+            for capacity in dyn_arch.zone_max_transport_cap
+        )
+    ):
         raise ValueError(
-            "SiqciArchRouter can only be used with the siqci_arch architecture."
+            "SiqciArchRouter can only be used with siqci-like linear architectures with one gate zone and capacity-2 zones."
         )
 
 
 def _validate_target_placement(
     dyn_arch: SgzlDynamicArch, target_placement: ZonePlacement
 ) -> list[int]:
+    """Return the requested gate-zone occupants after checking the siqci contract.
+
+    The specialized siqci gate selectors may specify either the next two qubits
+    that should occupy the single gate zone or a single qubit that must be
+    routed there with the cheapest legal partner. All other zones must remain
+    unspecified here.
+    """
     gate_zone = dyn_arch.single_gate_zone
     for zone, zone_qubits in enumerate(target_placement):
         if zone != gate_zone and zone_qubits:
@@ -72,14 +96,15 @@ def _validate_target_placement(
                 "SiqciArchRouter requires target placements to specify qubits only in the gate zone."
             )
     target_gate_qubits = target_placement[gate_zone]
-    if len(target_gate_qubits) not in (0, _PAIRED_ZONE_OCCUPANCY):
+    if len(target_gate_qubits) not in (1, _PAIRED_ZONE_OCCUPANCY):
         raise ValueError(
-            "SiqciArchRouter target placement must specify either zero or two qubits in the gate zone."
+            "SiqciArchRouter target placement must specify one or two qubits in the gate zone."
         )
     return target_gate_qubits
 
 
 def _state_from_dyn_arch(dyn_arch: SgzlDynamicArch) -> tuple[tuple[int, ...], ...]:
+    """Encode the current machine state as immutable per-zone qubit tuples."""
     return tuple(
         tuple(zone_qubits) for zone_qubits in dyn_arch.trap_configuration.zone_placement
     )
@@ -88,6 +113,11 @@ def _state_from_dyn_arch(dyn_arch: SgzlDynamicArch) -> tuple[tuple[int, ...], ..
 def _edge_qubits(
     zone_qubits: tuple[int, ...], src_port: PortId, n_move: int
 ) -> tuple[int, ...]:
+    """Return the qubits that can leave through the chosen port.
+
+    In a line architecture, only the qubits already sitting at the relevant edge
+    of the zone can shuttle across that connection without an intermediate swap.
+    """
     if src_port == PortId.p0:
         return zone_qubits[:n_move]
     return zone_qubits[-n_move:]
@@ -144,6 +174,17 @@ def _shuttle_actions(
     split_penalty: float,
     merge_penalty: float,
 ) -> list[_SiqciShuttleAction]:
+    """List all legal shuttles from the current siqci state.
+
+    Legal shuttles adhere to the following rules:
+    - A full 2-ion chain may shuttle only into an adjacent empty zone.
+    - A lone ion may shuttle into an adjacent empty or singly occupied zone.
+    - Splitting one ion away from a 2-ion chain is only allowed in internal
+      zones and only when both adjacent zones are empty.
+
+    The shuttle cost is calculated as the transport edge cost,
+     plus possible split or merge penalties.
+    """
     actions: list[_SiqciShuttleAction] = []
     ordered_zones = dyn_arch.linearly_ordered_zones
     for zone_position, src_zone in enumerate(ordered_zones):
@@ -166,6 +207,8 @@ def _shuttle_actions(
             )
 
             if src_occupancy == _PAIRED_ZONE_OCCUPANCY and targ_occupancy == 0:
+                # Moving a complete 2-ion chain is always preferred over splitting
+                # because it avoids the extra split penalty and preserves the pair.
                 actions.append(
                     _SiqciShuttleAction(
                         qubits=_edge_qubits(
@@ -194,6 +237,9 @@ def _shuttle_actions(
                 continue
 
             if src_occupancy == 1 and targ_occupancy <= 1:
+                # A single ion may move into either an empty zone or a singly
+                # occupied zone. Entering a singly occupied zone forms a pair and
+                # therefore incurs the configured merge penalty.
                 actions.append(
                     _SiqciShuttleAction(
                         qubits=_edge_qubits(src_zone_qubits, src_port, 1),
@@ -209,6 +255,8 @@ def _shuttle_actions(
     return sorted(
         actions,
         key=lambda action: (
+            # Keep action generation deterministic so Dijkstra explores equal-cost
+            # branches in a stable order across runs.
             action.src_zone,
             action.targ_zone,
             len(action.qubits),
@@ -220,6 +268,7 @@ def _shuttle_actions(
 def _pswap_actions(
     dyn_arch: SgzlDynamicArch, state: tuple[tuple[int, ...], ...]
 ) -> list[_SiqciPswapAction]:
+    """List all legal physical swaps in the current siqci state."""
     actions: list[_SiqciPswapAction] = []
     for zone, zone_qubits in enumerate(state):
         if len(zone_qubits) != _PAIRED_ZONE_OCCUPANCY:
@@ -238,14 +287,21 @@ def _pswap_actions(
 def _goal_reached(
     state: tuple[tuple[int, ...], ...], gate_zone: int, target_gate_qubits: list[int]
 ) -> bool:
-    if not target_gate_qubits:
-        return True
-    return set(state[gate_zone]) == set(target_gate_qubits)
+    gate_zone_qubits = set(state[gate_zone])
+    target_qubits = set(target_gate_qubits)
+    if len(target_gate_qubits) == 1:
+        return target_qubits.issubset(gate_zone_qubits)
+    return gate_zone_qubits == target_qubits
 
 
 def _append_step_ops(
     ops: list[RoutingOp], action: _SiqciPswapAction | _SiqciShuttleAction
 ) -> None:
+    """Emit one move group per physical action.
+
+    Keeping each action between routing barriers makes the routed circuit follow
+    the same sequence that the planner validated.
+    """
     if not ops:
         ops.append(RoutingBarrier())
     if isinstance(action, _SiqciPswapAction):
@@ -270,6 +326,16 @@ def _find_route_actions(
     split_penalty: float,
     merge_penalty: float,
 ) -> list[_SiqciPswapAction | _SiqciShuttleAction]:
+    """Find a minimum-cost legal siqci route with Dijkstra search.
+
+    The siqci architecture is small enough that we can search the exact machine
+    state space directly instead of relying on heuristics. A state is just the
+    ordered qubit occupants of each of the five zones. The outgoing edges are the
+    legal shuttles and pswaps produced by the siqci move rules. Because all move
+    costs are non-negative, Dijkstra gives the minimum-cost route to the first
+    state whose gate-zone occupants match the requested target pair, or contain
+    the requested target qubit in the singleton case.
+    """
     frontier: list[tuple[float, int, tuple[tuple[int, ...], ...]]] = []
     push_counter = count()
     heappush(frontier, (0.0, next(push_counter), start_state))
@@ -283,6 +349,8 @@ def _find_route_actions(
         if current_cost > best_cost.get(state, float("inf")):
             continue
         if _goal_reached(state, gate_zone, target_gate_qubits):
+            # The first goal popped from the priority queue is optimal because the
+            # search is over non-negative edge costs.
             final_state = state
             break
 
@@ -321,6 +389,7 @@ def _apply_route_actions(
     dyn_arch: SgzlDynamicArch,
     action_sequence: list[_SiqciPswapAction | _SiqciShuttleAction],
 ) -> RoutingResult:
+    """Replay the planned action sequence on the mutable DynamicArch."""
     routing_ops: list[RoutingOp] = []
     total_cost = 0.0
     for action in action_sequence:
@@ -339,7 +408,26 @@ def _apply_route_actions(
 
 
 class SiqciArchRouter(Router):
-    """Router specialized to the siqci_arch architecture."""
+    """Router specialized to the five-zone `siqci_arch` line architecture.
+
+    This router is much more specialized than the general single-gate-zone line
+    router. The architecture is tiny, every zone has gate and transport capacity
+    2, and pswaps are allowed in any doubly occupied zone. Because of that, the
+    router can plan directly in the exact machine state space.
+
+    The workflow is:
+    1. Validate that the target placement specifies either one qubit that must be
+       brought into the gate zone or exactly the next two qubits that should
+       occupy the single gate zone.
+    2. Encode the current zone occupancies as an immutable search state.
+    3. Run Dijkstra search over all legal shuttles and pswaps, using the siqci
+       transport, split, merge, and swap costs,
+    4. Replay the optimal action sequence on the mutable dynamic architecture and
+       emit the corresponding routing ops.
+
+    This keeps the implementation compact while still matching the siqci-specific
+    movement rules exactly.
+    """
 
     def __init__(self, split_penalty: float = 1.0, merge_penalty: float = 0.8):
         self.split_penalty = split_penalty
@@ -350,12 +438,10 @@ class SiqciArchRouter(Router):
         dyn_arch: DynamicArch,
         target_placement: ZonePlacement,
     ) -> RoutingResult:
+        """Route the current siqci state to the requested next gate-zone target."""
         sgzl_dyn_arch = require_sgzl_dynamic_arch(dyn_arch)
         _validate_siqci_architecture(sgzl_dyn_arch)
         target_gate_qubits = _validate_target_placement(sgzl_dyn_arch, target_placement)
-        if not target_gate_qubits:
-            return RoutingResult(cost_estimate=0, routing_ops=[])
-
         start_state = _state_from_dyn_arch(sgzl_dyn_arch)
         gate_zone = sgzl_dyn_arch.single_gate_zone
         if _goal_reached(start_state, gate_zone, target_gate_qubits):

@@ -28,6 +28,13 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selectio
 from pytket.extensions.aqt.multi_zone_architecture.depth_list.depth_list import (
     DepthInfo,
 )
+from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
+    MultiZoneArchitectureSpec,
+    PortId,
+    PortSpec,
+    Zone,
+    ZoneConnection,
+)
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
 )
@@ -45,6 +52,28 @@ def _configuration(zone_placement: list[list[int]]) -> TrapConfiguration:
     return TrapConfiguration(
         n_qubits=sum(len(zone_qubits) for zone_qubits in zone_placement),
         zone_placement=zone_placement,
+    )
+
+
+def _siqci_like_architecture(gate_zone: int) -> MultiZoneArchitectureSpec:
+    return MultiZoneArchitectureSpec(
+        n_qubits_max=5,
+        n_zones=5,
+        zones=[
+            Zone(
+                max_ions_gate_op=2,
+                max_ions_transport_op=2,
+                memory_only=i != gate_zone,
+            )
+            for i in range(5)
+        ],
+        connections=[
+            ZoneConnection(
+                zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
+                zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
+            )
+            for i in range(4)
+        ],
     )
 
 
@@ -81,11 +110,24 @@ def test_siqci_arch_gate_selector_fails_for_other_architectures() -> None:
     with pytest.raises(
         ValueError,
         match=(
-            r"SiqciArchGateSelector can only be used with the siqci_arch "
-            r"architecture\."
+            r"SiqciArchGateSelector can only be used with siqci-like linear "
+            r"architectures with one gate zone and capacity-2 zones\."
         ),
     ):
         SiqciArchGateSelector().next_config(dyn_arch, [])
+
+
+def test_siqci_arch_gate_selector_accepts_siqci_like_architecture_with_moved_gate_zone() -> (
+    None
+):
+    moved_gate_zone_arch = _siqci_like_architecture(gate_zone=1)
+    dyn_arch = SgzlDynamicArch(
+        moved_gate_zone_arch, _configuration([[0], [1, 2], [3], [4], []])
+    )
+
+    target_config = SiqciArchGateSelector().next_config(dyn_arch, [])
+
+    assert target_config == [[] for _ in range(moved_gate_zone_arch.n_zones)]
 
 
 def test_siqci_arch_gate_selector_prefers_swap_free_pair_from_depth_block_zero() -> (
@@ -133,7 +175,7 @@ def test_siqci_arch_gate_selector_keeps_existing_non_gate_pair_for_single_gate_q
         dyn_arch, circ.get_commands()
     )
 
-    assert target_config == [[], [], [], [0, 1], []]
+    assert target_config == [[], [], [], [0], []]
 
 
 def test_siqci_arch_gate_selector_uses_adjacent_unpaired_swap_free_pair_for_single_gate_qubit() -> (
@@ -147,7 +189,7 @@ def test_siqci_arch_gate_selector_uses_adjacent_unpaired_swap_free_pair_for_sing
         dyn_arch, circ.get_commands()
     )
 
-    assert target_config == [[], [], [], [1, 2], []]
+    assert target_config == [[], [], [], [1], []]
 
 
 def test_siqci_arch_gate_selector_falls_back_to_closest_gate_zone_qubit_for_single_gate_qubit() -> (
@@ -161,12 +203,24 @@ def test_siqci_arch_gate_selector_falls_back_to_closest_gate_zone_qubit_for_sing
         dyn_arch, circ.get_commands()
     )
 
-    assert target_config == [[], [], [], [3, 4], []]
+    assert target_config == [[], [], [], [4], []]
 
 
-def test_siqci_arch_gate_selector_chooses_best_two_qubit_combination_from_single_qubit_gates() -> (
-    None
-):
+def test_siqci_arch_gate_selector_chooses_singleton_when_no_pair_is_swap_free() -> None:
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [2], [3, 4], []]))
+    circ = Circuit(5)
+    circ.H(0)
+    circ.Rx(0.5, 4)
+    circ.Ry(0.25, 2)
+
+    target_config = handle_only_single_qubit_gates_remaining(
+        dyn_arch, circ.get_commands()
+    )
+
+    assert target_config == [[], [], [], [2], []]
+
+
+def test_siqci_arch_gate_selector_prefers_swap_free_pair_over_singleton() -> None:
     dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [2], [3, 4], []]))
     circ = Circuit(5)
     circ.H(1)
