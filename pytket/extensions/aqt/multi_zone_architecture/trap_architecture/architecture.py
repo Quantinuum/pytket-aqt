@@ -77,9 +77,9 @@ class Zone(BaseModel):
                 f"'max_ions_gate_op' must be at least 1."
                 f" Got max_ions_transport_op={self.max_ions_gate_op},"
             )
-        if self.max_ions_transport_op <= self.max_ions_gate_op:
+        if self.max_ions_transport_op < self.max_ions_gate_op:
             raise ValueError(
-                f"'max_ions_transport_op' must be greater than 'max_ions_gate_op'."
+                f"'max_ions_transport_op' must be greater or equal to 'max_ions_gate_op'."
                 f" Got max_ions_transport_op={self.max_ions_transport_op},"
                 f" max_ions_gate_op={self.max_ions_gate_op}"
             )

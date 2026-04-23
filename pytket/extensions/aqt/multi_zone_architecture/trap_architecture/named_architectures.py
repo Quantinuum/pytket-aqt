@@ -49,12 +49,12 @@ four_zones_in_a_line = MultiZoneArchitectureSpec(
 
 _SIQCI_GATE_ZONE = 3
 siqci_arch = MultiZoneArchitectureSpec(
-    n_qubits_max=6,
+    n_qubits_max=5,
     n_zones=5,
     zones=[
         Zone(
             max_ions_gate_op=2,
-            max_ions_transport_op=3,
+            max_ions_transport_op=2,
             memory_only=i != _SIQCI_GATE_ZONE,
         )
         for i in range(5)

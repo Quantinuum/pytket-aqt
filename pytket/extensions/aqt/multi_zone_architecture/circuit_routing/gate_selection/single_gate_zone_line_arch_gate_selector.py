@@ -94,11 +94,11 @@ def handle_only_single_qubit_gates_remaining(
     largest_swap_free_list = []
     smallest_interval_list = []
     current_interval_count = dyn_arch.n_qubits
-    qubits_with_gates = []
+    qubits_with_gates = set()
     for cmd in remaining_commands:
         if cmd.op.type == OpType.Barrier:
             continue
-        qubits_with_gates.append(cmd.args[0].index[0])
+        qubits_with_gates.add(cmd.args[0].index[0])
     swap_free_block_found = False
     for i in range(1, min(len(qubits_with_gates), dyn_arch.gate_capacity)):
         swap_free_block_current_depth_found = False

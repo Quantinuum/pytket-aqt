@@ -13,12 +13,20 @@
 # limitations under the License.
 
 import pytest
+from pytket.circuit import Circuit
 
 from pytket.extensions.aqt.multi_zone_architecture.circuit.helpers import (
     TrapConfiguration,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
     SiqciArchGateSelector,
+)
+from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.siqci_arch_gate_selector import (
+    handle_2qb_gates_remaining,
+    handle_only_single_qubit_gates_remaining,
+)
+from pytket.extensions.aqt.multi_zone_architecture.depth_list.depth_list import (
+    DepthInfo,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
@@ -78,3 +86,95 @@ def test_siqci_arch_gate_selector_fails_for_other_architectures() -> None:
         ),
     ):
         SiqciArchGateSelector().next_config(dyn_arch, [])
+
+
+def test_siqci_arch_gate_selector_prefers_swap_free_pair_from_depth_block_zero() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [], [2, 3], [4]]))
+
+    target_config = handle_2qb_gates_remaining(
+        dyn_arch,
+        DepthInfo(
+            depth_list=[[(0, 1), (3, 4)]],
+            depth_blocks=[[{0, 1}, {3, 4}]],
+        ),
+    )
+
+    assert target_config == [[], [], [], [3, 4], []]
+
+
+def test_siqci_arch_gate_selector_uses_smallest_interval_pair_when_no_pair_is_swap_free() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [], [2, 3], [4]]))
+
+    target_config = handle_2qb_gates_remaining(
+        dyn_arch,
+        DepthInfo(
+            depth_list=[[(0, 3), (1, 3)]],
+            depth_blocks=[[{0, 3}, {1, 3}]],
+        ),
+    )
+
+    assert target_config == [[], [], [], [1, 3], []]
+
+
+def test_siqci_arch_gate_selector_keeps_existing_non_gate_pair_for_single_gate_qubit() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(
+        siqci_arch, _configuration([[0, 1], [2], [], [3, 4], []])
+    )
+    circ = Circuit(5)
+    circ.H(0)
+
+    target_config = handle_only_single_qubit_gates_remaining(
+        dyn_arch, circ.get_commands()
+    )
+
+    assert target_config == [[], [], [], [0, 1], []]
+
+
+def test_siqci_arch_gate_selector_uses_adjacent_unpaired_swap_free_pair_for_single_gate_qubit() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [2], [3, 4], []]))
+    circ = Circuit(5)
+    circ.H(1)
+
+    target_config = handle_only_single_qubit_gates_remaining(
+        dyn_arch, circ.get_commands()
+    )
+
+    assert target_config == [[], [], [], [1, 2], []]
+
+
+def test_siqci_arch_gate_selector_falls_back_to_closest_gate_zone_qubit_for_single_gate_qubit() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [], [2, 3], [4]]))
+    circ = Circuit(5)
+    circ.H(4)
+
+    target_config = handle_only_single_qubit_gates_remaining(
+        dyn_arch, circ.get_commands()
+    )
+
+    assert target_config == [[], [], [], [3, 4], []]
+
+
+def test_siqci_arch_gate_selector_chooses_best_two_qubit_combination_from_single_qubit_gates() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(siqci_arch, _configuration([[0], [1], [2], [3, 4], []]))
+    circ = Circuit(5)
+    circ.H(1)
+    circ.Rx(0.5, 2)
+    circ.Ry(0.25, 4)
+
+    target_config = handle_only_single_qubit_gates_remaining(
+        dyn_arch, circ.get_commands()
+    )
+
+    assert target_config == [[], [], [], [1, 2], []]

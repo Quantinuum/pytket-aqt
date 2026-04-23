@@ -7,7 +7,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit import (
     write_multi_zone_circuit_movie_html,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection import (
-    SingleGateZoneLineArchGateSelector,
+    SiqciArchGateSelector,
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing import (
     SingleGateZoneLineArchRouter,
@@ -52,15 +52,16 @@ def _routed_non_linear_visualizer_circuit(
     compilation_settings = CompilationSettings(
         pytket_optimisation_level=1,
         initial_placement=InitialPlacementSettings(
-            algorithm=InitialPlacementAlg.qubit_order,
+            algorithm=InitialPlacementAlg.manual,
             zone_free_space=0,
+            manual_placement=[[2], [3], [], [0, 1], [4]],
         ),
         routing=RoutingConfig(
             router=SingleGateZoneLineArchRouter(),
-            gate_selector=SingleGateZoneLineArchGateSelector(),
+            gate_selector=SiqciArchGateSelector(),
         ),
     )
-    qft_circuit = build_test_circuit(6)
+    qft_circuit = build_test_circuit(5)
     compiled = backend.compile_circuit(qft_circuit, compilation_settings)
     return backend.route_compiled(compiled, compilation_settings)
 
