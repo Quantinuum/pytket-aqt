@@ -226,12 +226,34 @@ def test_build_multi_zone_circuit_movie_frames_condenses_contiguous_gate_blocks(
 
     frames = build_multi_zone_circuit_movie_frames(circuit)
 
-    assert [frame.kind for frame in frames] == ["initial", "gate", "shuttle", "gate"]
+    assert [frame.kind for frame in frames] == [
+        "initial",
+        "gate",
+        "new_target",
+        "shuttle",
+        "gate",
+    ]
+    assert frames[0].upcoming_qubits == [0, 1, 2]
+    assert frames[0].upcoming_gate_zone_by_qubit == {0: 1, 1: 1, 2: 2}
     assert frames[1].command_text == "QOPS 0-2;"
     assert frames[1].highlight_qubits == [0, 1, 2]
-    assert frames[2].kind == "shuttle"
-    assert frames[3].command_text == "QOPS 0-2;"
-    assert frames[3].highlight_qubits == [0, 1, 2]
+    assert frames[2].command_text == "New target"
+    assert frames[2].zone_placement == frames[1].zone_placement
+    assert frames[2].upcoming_gate_zone_by_qubit == {1: 2, 2: 2, 0: 1}
+    assert frames[3].kind == "shuttle"
+    assert frames[4].command_text == "QOPS 0-2;"
+    assert frames[4].highlight_qubits == [0, 1, 2]
+
+
+def test_build_multi_zone_circuit_movie_frames_tracks_upcoming_gate_zones() -> None:
+    circuit = _compiled_visualizer_multi_gate_circuit()
+
+    frames = build_multi_zone_circuit_movie_frames(circuit, condense_quantum_ops=False)
+
+    shuttle_frame = next(frame for frame in frames if frame.kind == "shuttle")
+
+    assert shuttle_frame.upcoming_qubits == [0, 1, 2]
+    assert shuttle_frame.upcoming_gate_zone_by_qubit == {1: 2, 2: 2, 0: 1}
 
 
 def test_build_multi_zone_circuit_movie_frames_can_keep_individual_gate_frames() -> (
@@ -246,6 +268,7 @@ def test_build_multi_zone_circuit_movie_frames_can_keep_individual_gate_frames()
         "gate",
         "gate",
         "gate",
+        "new_target",
         "shuttle",
         "gate",
         "gate",
@@ -253,9 +276,11 @@ def test_build_multi_zone_circuit_movie_frames_can_keep_individual_gate_frames()
     assert frames[1].command_text.startswith("Rx(")
     assert frames[2].command_text.startswith("Ry(")
     assert frames[3].command_text.startswith("XXPhase(")
-    assert frames[4].command_text == "SHUTTLE(1→2) 1;"
-    assert frames[5].command_text.startswith("Rz(")
-    assert frames[6].command_text.startswith("XXPhase(")
+    assert frames[4].command_text == "New target"
+    assert frames[4].upcoming_gate_zone_by_qubit == {1: 2, 2: 2, 0: 1}
+    assert frames[5].command_text == "SHUTTLE(1→2) 1;"
+    assert frames[6].command_text.startswith("Rz(")
+    assert frames[7].command_text.startswith("XXPhase(")
 
 
 def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -> None:
@@ -272,10 +297,11 @@ def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -
     assert "PSWAP 1\\u21942;" in html
     assert '"n_qubits": 3' in html
     assert "textContent = String(qubit);" in html
-    assert 'return "#3a86ff";' in html
+    assert 'return "#111111";' in html
     assert 'const operationsList = document.getElementById("operations-list");' in html
     assert "const currentOperationRow = 10;" in html
     assert "const visibleOperationRows = 16;" in html
+    assert "function upcomingQubitColor(targetGateZone)" in html
     assert "let isPlaying = false;" in html
     assert '<button id="play-pause" type="button">Play</button>' in html
     assert (
@@ -295,6 +321,18 @@ def test_generate_multi_zone_circuit_movie_html_contains_embedded_movie_data() -
     assert "frameIndex = 0;" in html
     assert "renderFrame(frameIndex, false);" in html
     assert "renderFrame(frameIndex);\n  </script>" in html
+
+
+def test_build_multi_zone_circuit_movie_assigns_distinct_gate_zone_colors() -> None:
+    movie = build_multi_zone_circuit_movie(_compiled_visualizer_multi_gate_circuit())
+
+    gate_zones = [zone for zone in movie.zones if zone["is_gate_zone"]]
+
+    assert len(gate_zones) == 2
+    assert gate_zones[0]["gate_color"] != gate_zones[1]["gate_color"]
+    assert gate_zones[0]["gate_qubit_color"] != gate_zones[1]["gate_qubit_color"]
+    assert gate_zones[0]["gate_color"] == "#f6d2a4"
+    assert gate_zones[1]["gate_color"] == "#f3e49d"
 
 
 def test_generate_multi_zone_circuit_movie_html_can_disable_quantum_op_condensing() -> (
@@ -333,7 +371,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_operation_stream_hooks(
     assert "row.textContent = frameData.command_text;" in html
 
 
-def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_motion_hooks() -> (
+def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_motion_hooks() -> (  # noqa: PLR0915
     None
 ):
     circuit = _compiled_visualizer_circuit()
@@ -394,8 +432,12 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert 'rotateHandle.addEventListener("pointerdown", (event) => {' in html
     assert 'svg.addEventListener("pointermove", handleZoneDrag);' in html
     assert 'svg.addEventListener("pointerup", stopZoneDrag);' in html
-    assert "--gate-zone-fill: #f3c2c2;" in html
-    assert "--gate-zone-stroke: #ba5c5c;" in html
+    assert 'fill: zone.is_gate_zone ? zone.gate_color : "var(--zone-fill)"' in html
+    assert (
+        'stroke: zone.is_gate_zone ? zone.gate_stroke_color : "var(--zone-stroke)"'
+        in html
+    )
+    assert "fill: var(--zone-fill);" not in html
     assert "color: #b91c1c;" in html
     assert "label.textContent = `Z${zone.id}`;" in html
     assert '} else if (animate && frame.kind === "pswap") {' in html

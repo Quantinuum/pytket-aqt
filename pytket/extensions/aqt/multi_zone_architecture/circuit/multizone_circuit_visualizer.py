@@ -78,6 +78,7 @@ class MultiZoneCircuitMovieFrame:
     zone_placement: list[list[int]]
     highlight_qubits: list[int]
     upcoming_qubits: list[int]
+    upcoming_gate_zone_by_qubit: dict[int, int]
     shuttle: dict[str, Any] | None = None
 
 
@@ -100,6 +101,22 @@ class _SlotLayout:
     transport_capacity: int
 
 
+def _gate_zone_color_map(circuit: MultiZoneCircuit) -> dict[int, dict[str, str]]:
+    gate_zone_palette = [
+        {"fill": "#f6d2a4", "stroke": "#cf8b2d", "qubit": "#d99a32"},
+        {"fill": "#f3e49d", "stroke": "#b99a26", "qubit": "#d5b227"},
+        {"fill": "#d9e9c3", "stroke": "#7ba348", "qubit": "#8ab14d"},
+        {"fill": "#c6e4df", "stroke": "#4c9a90", "qubit": "#51aaa0"},
+        {"fill": "#d7d5f5", "stroke": "#746db6", "qubit": "#7d74d4"},
+        {"fill": "#f1d7bf", "stroke": "#b87f4a", "qubit": "#c9894d"},
+    ]
+    gate_zones = sorted(circuit.macro_arch.gate_zones)
+    return {
+        zone: gate_zone_palette[index % len(gate_zone_palette)]
+        for index, zone in enumerate(gate_zones)
+    }
+
+
 def build_multi_zone_circuit_movie(
     circuit: MultiZoneCircuit,
     *,
@@ -112,6 +129,12 @@ def build_multi_zone_circuit_movie(
             "Multi-zone circuit movie generation requires a compiled routed circuit."
         )
     zones = _zone_layout(circuit)
+    gate_zone_colors = _gate_zone_color_map(circuit)
+    for zone in zones:
+        if zone["is_gate_zone"]:
+            zone["gate_color"] = gate_zone_colors[zone["id"]]["fill"]
+            zone["gate_stroke_color"] = gate_zone_colors[zone["id"]]["stroke"]
+            zone["gate_qubit_color"] = gate_zone_colors[zone["id"]]["qubit"]
     edges = [
         {
             "source": int(source_zone),
@@ -148,6 +171,7 @@ def build_multi_zone_circuit_movie_frames(
     frames = _build_raw_multi_zone_circuit_movie_frames(circuit)
     if highlight_upcoming_qubits:
         frames = _set_upcoming_qubits(frames)
+    frames = _insert_new_target_frames(frames)
     if condense_quantum_ops:
         frames = _condense_quantum_gate_frames(frames)
     return frames
@@ -170,6 +194,7 @@ def _build_raw_multi_zone_circuit_movie_frames(
             zone_placement=deepcopy(current_placement),
             highlight_qubits=[],
             upcoming_qubits=[],
+            upcoming_gate_zone_by_qubit={},
             shuttle=None,
         )
     ]
@@ -195,6 +220,7 @@ def _build_raw_multi_zone_circuit_movie_frames(
                 zone_placement=deepcopy(current_placement),
                 highlight_qubits=[arg.index[0] for arg in cmd.args],
                 upcoming_qubits=[],
+                upcoming_gate_zone_by_qubit={},
             )
         elif "SHUTTLE" in op_string:
             source_zone, target_zone, source_port, target_port = (
@@ -208,6 +234,7 @@ def _build_raw_multi_zone_circuit_movie_frames(
                 zone_placement=deepcopy(current_placement),
                 highlight_qubits=[arg.index[0] for arg in cmd.args],
                 upcoming_qubits=[],
+                upcoming_gate_zone_by_qubit={},
                 shuttle={
                     "source_zone": source_zone,
                     "target_zone": target_zone,
@@ -224,6 +251,7 @@ def _build_raw_multi_zone_circuit_movie_frames(
                 zone_placement=deepcopy(current_placement),
                 highlight_qubits=[arg.index[0] for arg in cmd.args],
                 upcoming_qubits=[],
+                upcoming_gate_zone_by_qubit={},
                 shuttle=None,
             )
         else:
@@ -236,20 +264,62 @@ def _build_raw_multi_zone_circuit_movie_frames(
 def _set_upcoming_qubits(
     frames: list[MultiZoneCircuitMovieFrame],
 ) -> list[MultiZoneCircuitMovieFrame]:
-    involved_qubits = set()
+    involved_qubits: set[int] = set()
+    upcoming_gate_zone_by_qubit: dict[int, int] = {}
     reset = False
     for frame in reversed(frames):
         if frame.kind == "gate":
             if reset:
                 involved_qubits.clear()
+                upcoming_gate_zone_by_qubit.clear()
                 reset = False
             frame.upcoming_qubits = list(involved_qubits)
+            frame.upcoming_gate_zone_by_qubit = upcoming_gate_zone_by_qubit.copy()
+            qubit_to_zone = {
+                qubit: zone
+                for zone, zone_qubits in enumerate(frame.zone_placement)
+                for qubit in zone_qubits
+            }
             involved_qubits.update(frame.highlight_qubits)
+            for qubit in frame.highlight_qubits:
+                upcoming_gate_zone_by_qubit[qubit] = qubit_to_zone[qubit]
             continue
+        frame.upcoming_qubits = list(involved_qubits)
+        frame.upcoming_gate_zone_by_qubit = upcoming_gate_zone_by_qubit.copy()
         if frame.kind in ["pswap", "shuttle"]:
             reset = True
-            frame.upcoming_qubits = list(involved_qubits)
     return frames
+
+
+def _insert_new_target_frames(
+    frames: list[MultiZoneCircuitMovieFrame],
+) -> list[MultiZoneCircuitMovieFrame]:
+    augmented_frames: list[MultiZoneCircuitMovieFrame] = []
+    for index, frame in enumerate(frames):
+        augmented_frames.append(frame)
+        if frame.kind != "gate":
+            continue
+
+        next_frame = frames[index + 1] if index + 1 < len(frames) else None
+        if next_frame is None or next_frame.kind == "gate":
+            continue
+
+        if not next_frame.upcoming_qubits:
+            continue
+
+        augmented_frames.append(
+            MultiZoneCircuitMovieFrame(
+                command_index=None,
+                command_text="New target",
+                kind="new_target",
+                zone_placement=deepcopy(frame.zone_placement),
+                highlight_qubits=[],
+                upcoming_qubits=next_frame.upcoming_qubits.copy(),
+                upcoming_gate_zone_by_qubit=next_frame.upcoming_gate_zone_by_qubit.copy(),
+                shuttle=None,
+            )
+        )
+    return augmented_frames
 
 
 def _condense_quantum_gate_frames(
@@ -270,6 +340,7 @@ def _condense_quantum_gate_frames(
                     zone_placement=deepcopy(gate_block[0].zone_placement),
                     highlight_qubits=sorted(gate_block[0].highlight_qubits),
                     upcoming_qubits=[],
+                    upcoming_gate_zone_by_qubit={},
                     shuttle=None,
                 )
             )
@@ -286,6 +357,7 @@ def _condense_quantum_gate_frames(
                 zone_placement=deepcopy(gate_block[-1].zone_placement),
                 highlight_qubits=involved_qubits,
                 upcoming_qubits=[],
+                upcoming_gate_zone_by_qubit={},
                 shuttle=None,
             )
         )
@@ -376,12 +448,10 @@ def generate_multi_zone_circuit_movie_html(
       --bg: #fbf8f2;
       --fg: #1f2933;
       --muted: #5f6c7b;
-      --zone-fill: #fffaf0;
-      --zone-stroke: #b69260;
-      --gate-zone-fill: #f3c2c2;
-      --gate-zone-stroke: #ba5c5c;
+      --zone-fill: #ececec;
+      --zone-stroke: #111111;
       --edge: #b9c1c9;
-      --slot: #e7dbc4;
+      --slot: #d0d0d0;
       --highlight: #d62828;
       --control: #f0ece2;
       --control-stroke: #d1c8b8;
@@ -506,16 +576,10 @@ def generate_multi_zone_circuit_movie_html(
       stroke-linecap: round;
     }}
     .zone-box {{
-      fill: var(--zone-fill);
-      stroke: var(--zone-stroke);
       stroke-width: 2.2;
       rx: 20;
       ry: 20;
       cursor: grab;
-    }}
-    .zone-box.gate-zone {{
-      fill: var(--gate-zone-fill);
-      stroke: var(--gate-zone-stroke);
     }}
     .zone-box.dragging {{
       cursor: grabbing;
@@ -529,12 +593,8 @@ def generate_multi_zone_circuit_movie_html(
     }}
     .zone-rotate-handle {{
       fill: rgba(255, 255, 255, 0.92);
-      stroke: var(--zone-stroke);
       stroke-width: 1.6;
       cursor: pointer;
-    }}
-    .zone-rotate-handle.gate-zone {{
-      stroke: var(--gate-zone-stroke);
     }}
     .zone-rotate-icon {{
       font-size: 11px;
@@ -632,7 +692,15 @@ def generate_multi_zone_circuit_movie_html(
     }}
 
     function qubitColor(qubit) {{
-      return "#3a86ff";
+      return "#111111";
+    }}
+
+    function upcomingQubitColor(targetGateZone) {{
+      if (targetGateZone === null || targetGateZone === undefined) {{
+        return "#eace09";
+      }}
+      const zone = zoneMap.get(Number(targetGateZone));
+      return zone?.gate_qubit_color ?? "#eace09";
     }}
 
     function pointAlongShuttle(start, sourceAnchor, targetAnchor, end, progress) {{
@@ -863,6 +931,8 @@ def generate_multi_zone_circuit_movie_html(
         width: zone.width,
         height: zone.height,
         class: `zone-box${{zone.is_gate_zone ? " gate-zone" : ""}}`,
+        fill: zone.is_gate_zone ? zone.gate_color : "var(--zone-fill)",
+        stroke: zone.is_gate_zone ? zone.gate_stroke_color : "var(--zone-stroke)",
       }});
       staticLayer.appendChild(box);
 
@@ -903,6 +973,7 @@ def generate_multi_zone_circuit_movie_html(
         cy: zone.y + 12,
         r: 8,
         class: `zone-rotate-handle${{zone.is_gate_zone ? " gate-zone" : ""}}`,
+        stroke: zone.is_gate_zone ? zone.gate_stroke_color : "var(--zone-stroke)",
       }});
       const rotateIcon = createSvg("text", {{
         x: zone.x + zone.width - 12,
@@ -972,11 +1043,11 @@ def generate_multi_zone_circuit_movie_html(
       return positions;
     }}
 
-    function setQubitAppearance(qubitElement, qubit, active, upcoming) {{
+    function setQubitAppearance(qubitElement, qubit, active, upcomingGateZone) {{
       if (active){{
         qubitElement.circle.setAttribute("fill", "#d62828");
-      }} else if (upcoming) {{
-        qubitElement.circle.setAttribute("fill", "#eace09");
+      }} else if (upcomingGateZone !== null && upcomingGateZone !== undefined) {{
+        qubitElement.circle.setAttribute("fill", upcomingQubitColor(upcomingGateZone));
       }} else {{
         qubitElement.circle.setAttribute("fill", qubitColor(qubit));
       }}
@@ -1131,9 +1202,7 @@ def generate_multi_zone_circuit_movie_html(
       const activeQubits = new Set(
         frame.kind === "gate" ? frame.highlight_qubits : []
       );
-      const upcomingQubits = new Set(
-        frame.upcoming_qubits
-      );
+      const upcomingGateZones = frame.upcoming_gate_zone_by_qubit ?? {{}};
       const positions = qubitTransforms(frame);
       qubitElements.forEach((qubitElement, qubit) => {{
         const pos = positions.get(qubit);
@@ -1143,7 +1212,12 @@ def generate_multi_zone_circuit_movie_html(
         }}
         qubitElement.group.style.opacity = "1";
         qubitElement.group.setAttribute("transform", translate(pos.x, pos.y));
-        setQubitAppearance(qubitElement, qubit, activeQubits.has(qubit), upcomingQubits.has(qubit));
+        setQubitAppearance(
+          qubitElement,
+          qubit,
+          activeQubits.has(qubit),
+          upcomingGateZones[String(qubit)] ?? null
+        );
       }});
       if (animate && frame.kind === "shuttle") {{
         animateShuttle(frame, previousFrame, positions);
