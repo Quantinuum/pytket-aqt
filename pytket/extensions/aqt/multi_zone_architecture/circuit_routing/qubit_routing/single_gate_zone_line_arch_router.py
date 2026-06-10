@@ -20,10 +20,12 @@ from ...trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
     require_sgzl_dynamic_arch,
 )
-from ..routing_ops import RoutingBarrier, RoutingOp
+from ..routing_ops import RoutingBarrier, RoutingOp, Shuttle
 from .line_arch_router import (
+    _current_block_sizes,
+    _current_prefix_size,
+    _shuttle_across_boundary,
     execute_adjacent_swap_in_workspace,
-    execute_swap_free_segmentation,
     ordered_qubits,
     swap_free_routing_segmentation,
 )
@@ -104,6 +106,106 @@ def _swap_free_single_gate_zone_possible(
         and left_count <= dyn_arch.left_capacity
         and right_count <= dyn_arch.right_capacity
     )
+
+
+def _target_gate_qubits_already_in_gate_zone(
+    dyn_arch: SgzlDynamicArch, target_gate_qubits: list[int]
+) -> bool:
+    if not target_gate_qubits:
+        return True
+    gate_zone_qubits = set(
+        dyn_arch.trap_configuration.zone_placement[dyn_arch.single_gate_zone]
+    )
+    return set(target_gate_qubits).issubset(gate_zone_qubits)
+
+
+def _execute_swap_free_single_gate_zone_target(
+    dyn_arch: SgzlDynamicArch,
+    target_placement: ZonePlacement,
+    target_gate_qubits: list[int],
+) -> RoutingResult:
+    if _target_gate_qubits_already_in_gate_zone(dyn_arch, target_gate_qubits):
+        return RoutingResult(cost_estimate=0, routing_ops=[])
+
+    segmentation = swap_free_routing_segmentation(dyn_arch, target_placement)
+    if segmentation is None:
+        raise ValueError(
+            "SingleGateZoneLineArchRouter expected a shuttle-only route to the gate zone but none was found."
+        )
+    if dyn_arch.trap_configuration.zone_placement == segmentation.zone_placement:
+        return RoutingResult(cost_estimate=0, routing_ops=[])
+
+    desired_block_sizes = segmentation.block_sizes
+    ops: list[RoutingOp] = []
+    total_cost = 0
+
+    def append_shuttle(shuttle: Shuttle, shuttle_cost: int) -> None:
+        nonlocal total_cost
+        if not ops:
+            ops.append(RoutingBarrier())
+        ops.extend([shuttle, RoutingBarrier()])
+        total_cost += shuttle_cost
+
+    def target_reached() -> bool:
+        return _target_gate_qubits_already_in_gate_zone(dyn_arch, target_gate_qubits)
+
+    def sweep_boundaries(move_right: bool) -> bool:
+        boundary_indices = (
+            range(len(segmentation.ordered_zones) - 2, -1, -1)
+            if move_right
+            else range(len(segmentation.ordered_zones) - 1)
+        )
+        progress = False
+        for boundary_index in boundary_indices:
+            delta = (
+                _current_prefix_size(
+                    dyn_arch, segmentation.ordered_zones, boundary_index
+                )
+                - sum(desired_block_sizes[: boundary_index + 1])
+                if move_right
+                else sum(desired_block_sizes[: boundary_index + 1])
+                - _current_prefix_size(
+                    dyn_arch, segmentation.ordered_zones, boundary_index
+                )
+            )
+            if delta <= 0:
+                continue
+            shuttle_result = _shuttle_across_boundary(
+                dyn_arch,
+                segmentation.ordered_zones,
+                boundary_index,
+                move_right=move_right,
+                max_n_move=delta,
+            )
+            if shuttle_result is None:
+                continue
+            shuttle, shuttle_cost = shuttle_result
+            append_shuttle(shuttle, shuttle_cost)
+            progress = True
+            if target_reached():
+                break
+        return progress
+
+    while (
+        _current_block_sizes(dyn_arch, segmentation.ordered_zones)
+        != desired_block_sizes
+    ):
+        if target_reached():
+            return RoutingResult(cost_estimate=total_cost, routing_ops=ops)
+
+        progress = sweep_boundaries(move_right=True)
+        if target_reached():
+            return RoutingResult(cost_estimate=total_cost, routing_ops=ops)
+        progress = sweep_boundaries(move_right=False) or progress
+        if target_reached():
+            return RoutingResult(cost_estimate=total_cost, routing_ops=ops)
+
+        if not progress:
+            raise ValueError(
+                "SingleGateZoneLineArchRouter could not complete the shuttle-only route into the gate zone."
+            )
+
+    return RoutingResult(cost_estimate=total_cost, routing_ops=ops)
 
 
 def _class_assignment_target_order(
@@ -338,11 +440,17 @@ def _workspace_candidate_zones(
 
 
 def _execute_adjacent_swap_sequence(
-    dyn_arch: SgzlDynamicArch, swap_sequence: list[tuple[int, int]]
-) -> RoutingResult:
+    dyn_arch: SgzlDynamicArch,
+    swap_sequence: list[tuple[int, int]],
+    target_gate_qubits: list[int],
+) -> tuple[RoutingResult, bool]:
     routing_ops: list[RoutingOp] = []
     total_cost = 0.0
     for left_qubit, right_qubit in swap_sequence:
+        if _target_gate_qubits_already_in_gate_zone(dyn_arch, target_gate_qubits):
+            return RoutingResult(
+                cost_estimate=total_cost, routing_ops=routing_ops
+            ), True
         for workspace_zone in _workspace_candidate_zones(
             dyn_arch, left_qubit, right_qubit
         ):
@@ -359,7 +467,10 @@ def _execute_adjacent_swap_sequence(
             raise ValueError(
                 "SingleGateZoneLineArchRouter could not realize a planned adjacent swap in any workspace zone."
             )
-    return RoutingResult(cost_estimate=total_cost, routing_ops=routing_ops)
+    return (
+        RoutingResult(cost_estimate=total_cost, routing_ops=routing_ops),
+        _target_gate_qubits_already_in_gate_zone(dyn_arch, target_gate_qubits),
+    )
 
 
 class SingleGateZoneLineArchRouter(Router):
@@ -376,31 +487,27 @@ class SingleGateZoneLineArchRouter(Router):
         )
         if not target_gate_qubits:
             return RoutingResult(cost_estimate=0, routing_ops=[])
+        if _target_gate_qubits_already_in_gate_zone(sgzl_dyn_arch, target_gate_qubits):
+            return RoutingResult(cost_estimate=0, routing_ops=[])
 
         if _swap_free_single_gate_zone_possible(sgzl_dyn_arch, target_gate_qubits):
-            segmentation = swap_free_routing_segmentation(
-                sgzl_dyn_arch, target_placement
+            return _execute_swap_free_single_gate_zone_target(
+                sgzl_dyn_arch, target_placement, target_gate_qubits
             )
-            if segmentation is None:
-                raise ValueError(
-                    "SingleGateZoneLineArchRouter expected a swap-free segmentation but none was found."
-                )
-            return execute_swap_free_segmentation(sgzl_dyn_arch, segmentation)
 
         target_order = _class_assignment_target_order(sgzl_dyn_arch, target_gate_qubits)
         swap_sequence = _adjacent_swap_sequence(
             ordered_qubits(sgzl_dyn_arch), target_order
         )
-        swap_result = _execute_adjacent_swap_sequence(sgzl_dyn_arch, swap_sequence)
-
-        final_segmentation = swap_free_routing_segmentation(
-            sgzl_dyn_arch, target_placement
+        swap_result, reached_target_gate_zone = _execute_adjacent_swap_sequence(
+            sgzl_dyn_arch, swap_sequence, target_gate_qubits
         )
-        if final_segmentation is None:
-            raise ValueError(
-                "SingleGateZoneLineArchRouter could not reach a swap-free state after applying the planned adjacent swaps."
-            )
-        final_result = execute_swap_free_segmentation(sgzl_dyn_arch, final_segmentation)
+        if reached_target_gate_zone:
+            return swap_result
+
+        final_result = _execute_swap_free_single_gate_zone_target(
+            sgzl_dyn_arch, target_placement, target_gate_qubits
+        )
         total_cost = swap_result.cost_estimate + final_result.cost_estimate
         routing_ops = swap_result.routing_ops.copy()
         _append_routing_ops(routing_ops, final_result.routing_ops)

@@ -71,6 +71,14 @@ class _AbstractLineState:
     zone_placement: tuple[tuple[int, ...], ...]
 
 
+@dataclass(frozen=True)
+class _SwapFreeOrderContext:
+    current_qubit_order: list[int]
+    ordered_zones: list[int]
+    current_block_sizes: list[int]
+    zone_capacities: dict[int, int]
+
+
 @dataclass
 class _SearchState:
     abstract_state: _AbstractLineState
@@ -164,13 +172,16 @@ def analyze_swap_free_routing(
 ) -> SwapFreeRoutingAnalysis:
     ordered_zones = linearly_ordered_zones(dyn_arch)
     current_qubit_order = ordered_qubits(dyn_arch)
-    zone_capacities = {
-        zone: int(dyn_arch.zone_max_gate_cap[zone]) for zone in ordered_zones
-    }
+    current_block_sizes = _current_block_sizes(dyn_arch, ordered_zones)
     return _analyze_swap_free_routing_from_order(
-        current_qubit_order=current_qubit_order,
-        ordered_zones=ordered_zones,
-        zone_capacities=zone_capacities,
+        context=_SwapFreeOrderContext(
+            current_qubit_order=current_qubit_order,
+            ordered_zones=ordered_zones,
+            current_block_sizes=current_block_sizes,
+            zone_capacities={
+                zone: int(dyn_arch.zone_max_gate_cap[zone]) for zone in ordered_zones
+            },
+        ),
         target_placement=target_placement,
         fixed_block_sizes=fixed_block_sizes,
     )
@@ -183,28 +194,33 @@ def _analyze_swap_free_routing_state(
     fixed_block_sizes: dict[int, int] | None = None,
 ) -> SwapFreeRoutingAnalysis:
     return _analyze_swap_free_routing_from_order(
-        current_qubit_order=_ordered_qubits_state(state, context.ordered_zones),
-        ordered_zones=list(context.ordered_zones),
-        zone_capacities=context.zone_gate_capacities,
+        context=_SwapFreeOrderContext(
+            current_qubit_order=_ordered_qubits_state(state, context.ordered_zones),
+            ordered_zones=list(context.ordered_zones),
+            current_block_sizes=_current_block_sizes_state(
+                state, context.ordered_zones
+            ),
+            zone_capacities=context.zone_gate_capacities,
+        ),
         target_placement=target_placement,
         fixed_block_sizes=fixed_block_sizes,
     )
 
 
 def _analyze_swap_free_routing_from_order(
-    current_qubit_order: list[int],
-    ordered_zones: list[int],
-    zone_capacities: dict[int, int],
+    context: _SwapFreeOrderContext,
     target_placement: ZonePlacement,
     fixed_block_sizes: dict[int, int] | None = None,
 ) -> SwapFreeRoutingAnalysis:
     # In the swap-free case, each final zone must receive a contiguous block of the
     # current global qubit order. The DP tracks which prefixes can be assigned to
     # the first k zones while respecting capacities and any explicitly requested zones.
-    ordered_zone_positions = {zone: i for i, zone in enumerate(ordered_zones)}
-    n_qubits = len(current_qubit_order)
-    n_zones = len(ordered_zones)
+    ordered_zone_positions = {zone: i for i, zone in enumerate(context.ordered_zones)}
+    n_qubits = len(context.current_qubit_order)
+    n_zones = len(context.ordered_zones)
     fixed_block_sizes = {} if fixed_block_sizes is None else fixed_block_sizes
+    if len(context.current_block_sizes) != n_zones:
+        raise ValueError("Current block sizes must match the number of ordered zones.")
 
     required_zone_by_qubit = {
         qubit: zone
@@ -212,18 +228,47 @@ def _analyze_swap_free_routing_from_order(
         for qubit in zone_qubits
     }
 
-    dp = [[False] * (n_qubits + 1) for _ in range(n_zones + 1)]
+    inf_cost = sum(context.current_block_sizes) + (n_qubits + 1) * (n_zones + 1)
+    dp = [[inf_cost] * (n_qubits + 1) for _ in range(n_zones + 1)]
     predecessor: list[list[int | None]] = [
         [None] * (n_qubits + 1) for _ in range(n_zones + 1)
     ]
-    dp[0][0] = True
+    dp[0][0] = 0
     predecessor[0][0] = 0
 
-    for zone_pos, zone in enumerate(ordered_zones):
-        zone_capacity = zone_capacities[zone]
+    def update_zero_block_transition(
+        zone_pos: int,
+        prefix_length: int,
+        min_block_size: int,
+        current_cost: int,
+    ) -> None:
+        if min_block_size != 0:
+            return
+        next_cost = current_cost + abs(context.current_block_sizes[zone_pos])
+        if next_cost < dp[zone_pos + 1][prefix_length]:
+            dp[zone_pos + 1][prefix_length] = next_cost
+            predecessor[zone_pos + 1][prefix_length] = prefix_length
+
+    def update_block_transition(
+        zone_pos: int,
+        prefix_length: int,
+        block_size: int,
+        current_cost: int,
+    ) -> None:
+        new_prefix_length = prefix_length + block_size
+        next_cost = current_cost + abs(
+            block_size - context.current_block_sizes[zone_pos]
+        )
+        if next_cost < dp[zone_pos + 1][new_prefix_length]:
+            dp[zone_pos + 1][new_prefix_length] = next_cost
+            predecessor[zone_pos + 1][new_prefix_length] = prefix_length
+
+    for zone_pos, zone in enumerate(context.ordered_zones):
+        zone_capacity = context.zone_capacities[zone]
         fixed_block_size = fixed_block_sizes.get(zone)
         for prefix_length in range(n_qubits + 1):
-            if not dp[zone_pos][prefix_length]:
+            current_cost = dp[zone_pos][prefix_length]
+            if current_cost >= inf_cost:
                 continue
 
             min_block_size = 0 if fixed_block_size is None else fixed_block_size
@@ -233,29 +278,28 @@ def _analyze_swap_free_routing_from_order(
                 else min(fixed_block_size, n_qubits - prefix_length)
             )
 
-            if min_block_size == 0 and not dp[zone_pos + 1][prefix_length]:
-                dp[zone_pos + 1][prefix_length] = True
-                predecessor[zone_pos + 1][prefix_length] = prefix_length
+            update_zero_block_transition(
+                zone_pos, prefix_length, min_block_size, current_cost
+            )
             for block_size in range(max(min_block_size, 1), max_block_size + 1):
-                qubit = current_qubit_order[prefix_length + block_size - 1]
+                qubit = context.current_qubit_order[prefix_length + block_size - 1]
                 required_zone = required_zone_by_qubit.get(qubit)
                 if (
                     required_zone is not None
                     and ordered_zone_positions[required_zone] != zone_pos
                 ):
                     break
-                new_prefix_length = prefix_length + block_size
-                if not dp[zone_pos + 1][new_prefix_length]:
-                    dp[zone_pos + 1][new_prefix_length] = True
-                    predecessor[zone_pos + 1][new_prefix_length] = prefix_length
+                update_block_transition(
+                    zone_pos, prefix_length, block_size, current_cost
+                )
 
-    if not dp[n_zones][n_qubits]:
+    if dp[n_zones][n_qubits] >= inf_cost:
         return SwapFreeRoutingAnalysis(
             segmentation=None,
             failure_witness=_first_failure_witness(
-                ordered_zones,
-                current_qubit_order,
-                zone_capacities,
+                context.ordered_zones,
+                context.current_qubit_order,
+                context.zone_capacities,
                 required_zone_by_qubit,
                 fixed_block_sizes,
             ),
@@ -274,16 +318,16 @@ def _analyze_swap_free_routing_from_order(
 
     zone_placement: ZonePlacement = [[] for _ in range(n_zones)]
     order_index = 0
-    for zone_pos, zone in enumerate(ordered_zones):
+    for zone_pos, zone in enumerate(context.ordered_zones):
         block_size = block_sizes[zone_pos]
-        zone_placement[zone] = current_qubit_order[
+        zone_placement[zone] = context.current_qubit_order[
             order_index : order_index + block_size
         ]
         order_index += block_size
 
     return SwapFreeRoutingAnalysis(
         segmentation=SwapFreeSegmentation(
-            ordered_zones=ordered_zones,
+            ordered_zones=context.ordered_zones,
             block_sizes=block_sizes,
             zone_placement=zone_placement,
         ),

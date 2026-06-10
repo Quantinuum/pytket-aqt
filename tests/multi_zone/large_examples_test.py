@@ -380,6 +380,8 @@ def test_quantum_advantage_linear_8_zones_line_arch_router(
 def test_quantum_advantage_linear_9_zones_line_arch_router(
     tmp_path, gate_selector: str
 ) -> None:
+    g2qb = advantage_circuit_30_precomp.n_2qb_gates()
+    gd2qb = advantage_circuit_30_precomp.depth_2q()
     routed = linear_9_zones_backend.route_compiled(
         advantage_circuit_30_precomp,
         line_arch_compilation_settings[gate_selector],
@@ -388,7 +390,7 @@ def test_quantum_advantage_linear_9_zones_line_arch_router(
     written_path = write_multi_zone_circuit_movie_html(
         routed,
         movie_path,
-        title=f"Linear 9 Zones QA Circuit Routing: {routed.get_n_shuttles()} shuttles, {routed.get_n_pswaps()} swaps",
+        title=f"Linear 9 Zones QA Circ: {g2qb} 2qb gates, {gd2qb} 2qb gate depth, {routed.get_n_shuttles()} shuttles, {routed.get_n_pswaps()} swaps",
     )
     assert written_path == movie_path
     assert movie_path.exists()

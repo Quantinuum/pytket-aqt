@@ -22,6 +22,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.qubit_routing
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_ops import (
     PSwap,
+    Shuttle,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
     MultiZoneArchitectureSpec,
@@ -38,6 +39,7 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_archi
     four_zones_in_a_line,
     grid12,
     linear_8_zones,
+    linear_9_zones,
 )
 
 
@@ -105,6 +107,103 @@ def test_single_gate_zone_line_arch_router_routes_swap_free_case_into_gate_zone(
     assert result.cost_estimate == 1
     assert not any(isinstance(op, PSwap) for op in result.routing_ops)
     assert dyn_arch.trap_configuration.zone_placement == [[], [0, 1], [2]]
+
+
+def test_single_gate_zone_line_arch_router_returns_empty_result_when_target_qubits_are_already_in_gate_zone() -> (
+    None
+):
+    arch = _single_gate_zone_line_architecture([2, 2, 2], gate_zone=1)
+    dyn_arch = SgzlDynamicArch(arch, _configuration([[0], [1, 2], [3]]))
+
+    result = SingleGateZoneLineArchRouter().route_source_to_target_config(
+        dyn_arch,
+        [[], [1], []],
+    )
+
+    assert result.cost_estimate == 0
+    assert result.routing_ops == []
+    assert dyn_arch.trap_configuration.zone_placement == [[0], [1, 2], [3]]
+
+
+def test_single_gate_zone_line_arch_router_keeps_unspecified_qubits_close_to_current_zones() -> (
+    None
+):
+    arch = _single_gate_zone_line_architecture([2, 2, 2], gate_zone=1)
+    dyn_arch = SgzlDynamicArch(arch, _configuration([[0, 1], [2], [3]]))
+
+    result = SingleGateZoneLineArchRouter().route_source_to_target_config(
+        dyn_arch,
+        [[], [1], []],
+    )
+
+    assert result.cost_estimate == 2
+    assert not any(isinstance(op, PSwap) for op in result.routing_ops)
+    assert dyn_arch.trap_configuration.zone_placement == [[0], [1], [2, 3]]
+
+
+def test_single_gate_zone_line_arch_router_stops_once_target_qubits_reach_gate_zone() -> (
+    None
+):
+    dyn_arch = SgzlDynamicArch(
+        linear_9_zones,
+        _configuration(
+            [
+                [],
+                [],
+                [0],
+                [1, 5, 6, 20, 25, 26],
+                [2, 7, 8, 9, 10, 27],
+                [],
+                [3, 11, 12, 21, 13],
+                [14, 15, 28, 16, 17, 18],
+                [19, 22, 4, 23, 24, 29],
+            ]
+        ),
+    )
+    target_gate_qubits = {25, 28, 29}
+
+    result = SingleGateZoneLineArchRouter().route_source_to_target_config(
+        dyn_arch,
+        [[], [], [], [], [25, 28, 29], [], [], [], []],
+    )
+
+    replay_state = [
+        zone_qubits.copy()
+        for zone_qubits in [
+            [],
+            [],
+            [0],
+            [1, 5, 6, 20, 25, 26],
+            [2, 7, 8, 9, 10, 27],
+            [],
+            [3, 11, 12, 21, 13],
+            [14, 15, 28, 16, 17, 18],
+            [19, 22, 4, 23, 24, 29],
+        ]
+    ]
+    first_reached_index: int | None = None
+    for index, op in enumerate(result.routing_ops):
+        if isinstance(op, Shuttle):
+            for qubit in op.qubits:
+                replay_state[op.src_zone].remove(qubit)
+            if op.targ_port.value == 0:
+                replay_state[op.targ_zone] = op.qubits + replay_state[op.targ_zone]
+            else:
+                replay_state[op.targ_zone].extend(op.qubits)
+        elif isinstance(op, PSwap):
+            replay_state[op.zone_nr].reverse()
+        if target_gate_qubits.issubset(set(replay_state[4])):
+            first_reached_index = index
+            break
+
+    assert first_reached_index is not None
+    assert target_gate_qubits.issubset(
+        set(dyn_arch.trap_configuration.zone_placement[4])
+    )
+    assert not any(
+        isinstance(op, Shuttle | PSwap)
+        for op in result.routing_ops[first_reached_index + 1 :]
+    )
 
 
 def test_single_gate_zone_line_arch_router_uses_swaps_when_gate_interval_is_too_large() -> (
