@@ -163,21 +163,21 @@ def test_compiled_circuit_has_correct_syntax(backend: AQTMultiZoneBackend) -> No
             assert isinstance(operation[1], float)
             assert len(operation[2]) == 1
             assert _is_valid_zop(operation[2][0], initialized_zones)
-        elif operation[0] in ["MS"]:
+        elif operation[0] == "MS":
             assert len(operation) == 3
             assert isinstance(operation[1], float)
             assert len(operation[2]) == 2
             assert _zop_addresses_in_same_zone(operation[2][0], operation[2][1])
             assert _is_valid_zop(operation[2][0], initialized_zones)
             assert _is_valid_zop(operation[2][1], initialized_zones)
-        elif operation[0] in ["SHUTTLE"]:
+        elif operation[0] == "SHUTTLE":
             assert len(operation) == 3
             assert isinstance(operation[1], int)
             assert len(operation[2]) == 2
             assert _zop_addresses_in_different_zones(operation[2][0], operation[2][1])
             assert _is_valid_zop(operation[2][0], initialized_zones)
             assert _is_valid_zop(operation[2][1], initialized_zones)
-        elif operation[0] in ["PSWAP"]:
+        elif operation[0] == "PSWAP":
             assert len(operation) == 2
             assert len(operation[1]) == 2
             assert _zop_addresses_in_same_zone(operation[1][0], operation[1][1])
@@ -259,14 +259,14 @@ def test_automatically_routed_circuit_has_correct_syntax(  # noqa: PLR0915
             assert isinstance(operation[1], float)
             assert len(operation[2]) == 1
             assert _is_valid_zop(operation[2][0], initialized_zones)
-        elif operation[0] in ["MS"]:
+        elif operation[0] == "MS":
             assert len(operation) == 3
             assert isinstance(operation[1], float)
             assert len(operation[2]) == 2
             assert _zop_addresses_in_same_zone(operation[2][0], operation[2][1])
             assert _is_valid_zop(operation[2][0], initialized_zones)
             assert _is_valid_zop(operation[2][1], initialized_zones)
-        elif operation[0] in ["SHUTTLE"]:
+        elif operation[0] == "SHUTTLE":
             assert len(operation) == 3
             assert isinstance(operation[1], int)
             assert len(operation[2]) == 2
@@ -274,7 +274,7 @@ def test_automatically_routed_circuit_has_correct_syntax(  # noqa: PLR0915
             assert _is_valid_zop(operation[2][0], initialized_zones)
             assert _is_valid_zop(operation[2][1], initialized_zones)
             aqt_shuttles += 1
-        elif operation[0] in ["PSWAP"]:
+        elif operation[0] == "PSWAP":
             assert len(operation) == 2
             assert len(operation[1]) == 2
             assert _zop_addresses_in_same_zone(operation[1][0], operation[1][1])

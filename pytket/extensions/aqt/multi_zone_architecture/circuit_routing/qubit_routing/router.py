@@ -27,5 +27,7 @@ class RoutingResult:
 
 class Router(Protocol):
     def route_source_to_target_config(
-        self, dyn_arch: DynamicArch, target_placement: ZonePlacement
+        self,
+        dyn_arch: DynamicArch,
+        target_placement: ZonePlacement,
     ) -> RoutingResult: ...

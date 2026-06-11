@@ -41,8 +41,13 @@ class GreedyGateSelector(GateSelector):
     def __init__(
         self,
         cost_model: RoutingCostModel = _DEFAULT_COST_MODEL,
+        only_place_gate_qubits: bool = False,
     ):
         self._cost_model = cost_model
+        self._only_specify_gate_qubits = only_place_gate_qubits
+
+    def only_places_gate_qubits(self) -> bool:
+        return self._only_specify_gate_qubits
 
     def next_config(
         self,
@@ -100,7 +105,8 @@ class GreedyGateSelector(GateSelector):
                 qubit_tracker,
             )
         # Now move any unused qubits to vacant spots in new config
-        handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
+        if not self._only_specify_gate_qubits:
+            handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
         return qubit_tracker.new_placement()
 
     def handle_depth_list(
@@ -225,7 +231,7 @@ def handle_only_single_qubits_remaining(
     # locked qubits have already been assigned a zone in the new config and should therefore not move again
     locked_qubits = []
     for cmd in remaining_commands:
-        if cmd.op.type in [OpType.Barrier]:
+        if cmd.op.type == OpType.Barrier:
             continue
         qubit0 = cmd.args[0].index[0]
         is_locked_0 = qubit0 in locked_qubits

@@ -64,7 +64,6 @@ class MultiZonePortGraph:
     def __init__(
         self, spec: MultiZoneArchitectureSpec, start_config: TrapConfiguration
     ):
-        # TODO: Get swap cost(s) from spec (possibly zone dependent)
         self.swap_costs = [zone.swap_cost for zone in spec.zones]
 
         self.port_graph: Graph[int] = Graph()
@@ -119,6 +118,25 @@ class MultiZonePortGraph:
         )
         edge_dict["transport_cost"] = zone_occupancy * self.swap_costs[zone]
         self._path_cache.clear()
+
+    def shuttle_edge_transport_cost(
+        self, src_zone: int, src_port: int, trg_zone: int, trg_port: int
+    ) -> int:
+        edge_dict = self.port_graph.edges[
+            zone_port_to_port_id(src_zone, src_port),
+            zone_port_to_port_id(trg_zone, trg_port),
+        ]
+        return int(edge_dict["transport_cost"])
+
+    def shortest_port_to_port_path_length(
+        self,
+        start_zone: int,
+        start_port: int,
+        targ_zone: int,
+        targ_port,
+        n_move: int = 1,
+    ) -> tuple[list[int], int, int] | tuple[None, None, None]:
+        """Return the shortest path length for going from starting (zone, port) target (zone, port)"""
 
     def shortest_port_path_length(
         self, start_zone: int, start_port: int, targ_zone: int, n_move: int = 1

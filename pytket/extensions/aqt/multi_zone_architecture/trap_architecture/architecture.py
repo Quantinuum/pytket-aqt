@@ -77,9 +77,9 @@ class Zone(BaseModel):
                 f"'max_ions_gate_op' must be at least 1."
                 f" Got max_ions_transport_op={self.max_ions_gate_op},"
             )
-        if self.max_ions_transport_op <= self.max_ions_gate_op:
+        if self.max_ions_transport_op < self.max_ions_gate_op:
             raise ValueError(
-                f"'max_ions_transport_op' must be greater than 'max_ions_gate_op'."
+                f"'max_ions_transport_op' must be greater or equal to 'max_ions_gate_op'."
                 f" Got max_ions_transport_op={self.max_ions_transport_op},"
                 f" max_ions_gate_op={self.max_ions_gate_op}"
             )
@@ -93,6 +93,13 @@ class MultiZoneArchitectureSpec(BaseModel):
     n_zones: int
     zones: list[Zone]
     connections: list[ZoneConnection]
+
+    @model_validator(mode="after")
+    def set_and_validate(self) -> Self:
+        if self.n_zones != len(self.zones):
+            raise ValueError(
+                f"Multi-zone architecture defined to have {self.n_zones} zones, but {len(self.zones)} zones were defined."
+            )
 
     def get_zone_max_ions_gates(self, zone_index: int) -> int:
         zone = self.zones[zone_index]

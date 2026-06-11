@@ -14,14 +14,17 @@
 import logging
 from copy import deepcopy
 
-from pytket.circuit import Circuit, Command
+from pytket.circuit import Circuit
 
-from pytket import OpType
-
-from ..circuit.helpers import TrapConfiguration, ZonePlacement, get_qubit_to_zone
+from ..circuit.helpers import TrapConfiguration, ZonePlacement
 from ..circuit.multizone_circuit import MultiZoneCircuit
 from ..trap_architecture.architecture import MultiZoneArchitectureSpec
-from ..trap_architecture.dynamic_architecture import DynamicArch
+from ..trap_architecture.dynamic_architecture import (
+    DynamicArch,
+    LinearDynamicArch,
+    SgzlDynamicArch,
+)
+from .command_filtering import filter_implementable_commands
 from .gate_selection.greedy_gate_selection import GreedyGateSelector
 from .routing_config import RoutingConfig
 
@@ -48,9 +51,13 @@ def route_circuit(
     :param routing_config: Configuration to control routing options
     """
 
-    dynamic_arch = DynamicArch(
+    dynamic_arch: DynamicArch = DynamicArch(
         arch, TrapConfiguration(circuit.n_qubits, initial_placement)
     )
+    if dynamic_arch.is_linear_architecture:
+        dynamic_arch = LinearDynamicArch.from_dynamic_arch(dynamic_arch)
+        if len(dynamic_arch.gate_zones) == 1:
+            dynamic_arch = SgzlDynamicArch.from_linear_dynamic_arch(dynamic_arch)
 
     mz_circuit = MultiZoneCircuit(
         arch, initial_placement, circuit.n_qubits, circuit.n_bits
@@ -62,7 +69,9 @@ def route_circuit(
     commands = circuit.get_commands().copy()
 
     # Add implementable gates from initial config
-    implementable, commands = filter_implementable_commands(dynamic_arch, commands)
+    implementable, commands = filter_implementable_commands(
+        dynamic_arch.trap_configuration, dynamic_arch.gate_zones, commands
+    )
 
     [mz_circuit.add_gate(cmd.op.type, cmd.args, cmd.op.params) for cmd in implementable]
 
@@ -73,7 +82,7 @@ def route_circuit(
 
         old = [set(zone_q) for zone_q in dynamic_arch.trap_configuration.zone_placement]
         new = [set(zone_q) for zone_q in target_config]
-        if old == new:
+        if old == new or all(len(zone) == 0 for zone in new):
             if isinstance(gate_selector, GreedyGateSelector):
                 raise Exception(
                     f"Gate selector did not produce new configuration. Routing step: {routing_step}"
@@ -81,7 +90,14 @@ def route_circuit(
             logger.warning(
                 "Chosen gate selector did not produce new configuration. Using greedy gate selection for this round"
             )
-            target_config = GreedyGateSelector().next_config(dynamic_arch, commands)
+            fallback_selector = GreedyGateSelector(
+                only_place_gate_qubits=gate_selector.only_places_gate_qubits()
+            )
+            target_config = fallback_selector.next_config(dynamic_arch, commands)
+            if old == [set(zone_q) for zone_q in target_config]:
+                raise Exception(
+                    f"Fallback gate selector did not produce new configuration. Routing step: {routing_step}"
+                )
 
         old_placement = deepcopy(dynamic_arch.trap_configuration.zone_placement)
         routing_result = router.route_source_to_target_config(
@@ -95,63 +111,15 @@ def route_circuit(
         # Add routing operations to circuit
         mz_circuit.add_routing_ops(routing_result.routing_ops)
         # Add implementable gates from new config
-        implementable, commands = filter_implementable_commands(dynamic_arch, commands)
+        implementable, commands = filter_implementable_commands(
+            dynamic_arch.trap_configuration, dynamic_arch.gate_zones, commands
+        )
         for cmd in implementable:
             mz_circuit.add_gate(cmd.op.type, cmd.args, cmd.op.params)
 
         # increment routing step
         routing_step += 1
     return mz_circuit
-
-
-def filter_implementable_commands(
-    dynamic_arch: DynamicArch,
-    commands: list[Command],
-) -> tuple[list[Command], list[Command]]:
-    """Split gates into currently implementable and those that require a new config"""
-    leftovers: list[Command] = []
-    implementable: list[Command] = []
-    # stragglers are qubits with pending 2 qubit gates that cannot
-    # be performed in the current config
-    # they have to wait for the next iteration
-    current_config = dynamic_arch.trap_configuration
-    gate_zones = dynamic_arch.gate_zones
-    stragglers: set[int] = set()
-    qubit_to_zone_old = get_qubit_to_zone(
-        current_config.n_qubits, current_config.zone_placement
-    )
-    last_cmd_index = 0
-    for i, cmd in enumerate(commands):
-        if cmd.op.type in [OpType.Barrier]:
-            implementable.append(cmd)
-        last_cmd_index = i
-        n_args = len(cmd.args)
-        qubit0 = cmd.args[0].index[0]
-        zone0 = qubit_to_zone_old[qubit0]
-        if n_args == 1:
-            if qubit0 in stragglers or zone0 not in gate_zones:
-                leftovers.append(cmd)
-            else:
-                implementable.append(cmd)
-        elif n_args == 2:  # noqa: PLR2004
-            qubit1 = cmd.args[1].index[0]
-            if qubit0 in stragglers:
-                stragglers.add(qubit1)
-                leftovers.append(cmd)
-                continue
-            if qubit1 in stragglers:
-                stragglers.add(qubit0)
-                leftovers.append(cmd)
-                continue
-            if zone0 == qubit_to_zone_old[qubit1] and zone0 in gate_zones:
-                implementable.append(cmd)
-            else:
-                leftovers.append(cmd)
-                stragglers.update([qubit0, qubit1])
-        if len(stragglers) >= current_config.n_qubits:
-            # at this point no more gates can be performed in this config
-            break
-    return implementable, leftovers + commands[last_cmd_index + 1 :]
 
 
 def log_movement(

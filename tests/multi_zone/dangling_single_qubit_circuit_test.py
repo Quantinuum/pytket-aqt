@@ -21,16 +21,17 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_archi
 
 
 def build_test_circuit(n_qubits: int) -> Circuit:
-    circ = Circuit(n_qubits + 1, name="QFT")
-    for i in range(n_qubits):
+    nq_build = n_qubits - 1
+    circ = Circuit(n_qubits, name="QFT")
+    for i in range(nq_build):
         circ.H(i)
-        for j in range(i + 1, n_qubits):
+        for j in range(i + 1, nq_build):
             circ.CU1(1 / 2 ** (j - i), j, i)
-    for k in range(n_qubits // 2):
-        circ.SWAP(k, n_qubits - k - 1)
-    circ.H(n_qubits)
-    circ.S(n_qubits)
-    circ.X(n_qubits)
+    for k in range(nq_build // 2):
+        circ.SWAP(k, nq_build - k - 1)
+    circ.H(nq_build)
+    circ.S(nq_build)
+    circ.X(nq_build)
     return circ
 
 

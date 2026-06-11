@@ -12,11 +12,14 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from collections.abc import Iterable
 from dataclasses import dataclass
 from typing import cast
 
 from networkx import (
     Graph,
+    is_connected,
+    is_tree,
     single_source_dijkstra,
 )
 
@@ -73,10 +76,41 @@ class MultiZoneArch:
                     f" specified, but only 1 connection between two zones is allowed"
                 )
             self.zone_graph.add_edge(int(zone0), int(zone1), transport_cost=1)
+        self.is_linear_architecture = self._check_is_linear_architecture()
+
+    def _check_is_linear_architecture(self) -> bool:
+        """Return whether the macro architecture forms a single non-branching line."""
+        if self.zone_graph.number_of_nodes() == 0:
+            return False
+        if not is_connected(self.zone_graph):
+            return False
+        if not is_tree(self.zone_graph):
+            return False
+
+        degrees = [degree for _, degree in self.zone_graph.degree()]
+        edge_degree = 1
+        interior_degree = 2
+        n_endpoints = sum(degree == edge_degree for degree in degrees)
+        n_interior = sum(degree == interior_degree for degree in degrees)
+        expected_n_endpoints = 2
+        return n_endpoints == expected_n_endpoints and n_endpoints + n_interior == len(
+            degrees
+        )
 
     def shortest_path(self, zone_1: int, zone_2: int) -> list[int]:
         _, path = self.shortest_path_with_length(zone_1, zone_2)
         return path
+
+    def connected_zones(self, zone) -> Iterable[int]:
+        return self.zone_graph.neighbors(zone)
+
+    def connected_zones_per_port(self, zone) -> tuple[list[int], list[int]]:
+        neighbors = self.zone_graph.neighbors(zone)
+        port_connections = ([], [])
+        for neighbor in neighbors:
+            port_connection, _ = self.get_connected_ports(zone, neighbor)
+            port_connections[port_connection.value].append(neighbor)
+        return port_connections
 
     def shortest_path_with_length(
         self, zone_1: int, zone_2: int

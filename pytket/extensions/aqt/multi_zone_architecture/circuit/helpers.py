@@ -22,8 +22,8 @@ ZonePlacement = list[list[int]]
 
 def get_qubit_to_zone(
     n_qubits: int, placement: ZonePlacement
-) -> np.ndarray[tuple[int], np.dtype[np.uint64]]:
-    qubit_to_zone = np.zeros(n_qubits, dtype=np.uint64)
+) -> np.ndarray[tuple[int], np.dtype[np.int64]]:
+    qubit_to_zone = -np.ones(n_qubits, dtype=np.int64)
     for zone, qubits in enumerate(placement):
         qubit_to_zone[qubits] = zone
     return qubit_to_zone

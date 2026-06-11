@@ -16,7 +16,7 @@ import math
 
 from pytket.circuit import Command
 
-from ...circuit.helpers import ZonePlacement
+from ...circuit.helpers import TrapConfiguration, ZonePlacement
 from ...depth_list.depth_list import (
     DepthInfo,
     depth_info_from_command_list,
@@ -34,6 +34,7 @@ else:
 
 from ...trap_architecture.cost_model import RoutingCostModel, ShuttlePSwapCostModel
 from ...trap_architecture.dynamic_architecture import DynamicArch
+from ..command_filtering import filter_implementable_commands
 from .gate_selector_protocol import GateSelector
 from .greedy_gate_selection import (
     handle_only_single_qubits_remaining,
@@ -67,9 +68,14 @@ class GraphPartitionGateSelector(GateSelector):
         self,
         cost_model: RoutingCostModel = _DEFAULT_COST_MODEL,
         max_depth: int = 50,
+        only_place_gate_qubits: bool = False,
     ):
         self._cost_model = cost_model
         self._max_depth = max_depth
+        self._only_specify_gate_qubits = only_place_gate_qubits
+
+    def only_places_gate_qubits(self) -> bool:
+        return self._only_specify_gate_qubits
 
     def next_config(
         self,
@@ -90,7 +96,9 @@ class GraphPartitionGateSelector(GateSelector):
         n_qubits = current_configuration.n_qubits
         depth_info = depth_info_from_command_list(n_qubits, remaining_commands)
         if depth_info.depth_list:
-            return self.handle_2qb_gates_remaining(dyn_arch, depth_info)
+            return self.handle_2qb_gates_remaining(
+                dyn_arch, depth_info, remaining_commands
+            )
         return self.handle_only_single_qubit_gates_remaining(
             dyn_arch, remaining_commands
         )
@@ -99,6 +107,7 @@ class GraphPartitionGateSelector(GateSelector):
         self,
         dyn_arch: DynamicArch,
         depth_info: DepthInfo,
+        remaining_commands: list[Command],
     ) -> ZonePlacement:
         num_zones = dyn_arch.n_zones
         n_qubits = dyn_arch.n_qubits
@@ -112,6 +121,16 @@ class GraphPartitionGateSelector(GateSelector):
             part_to_zone[vertex_to_part[vertex]] = vertex - n_qubits
         for vertex in range(n_qubits):
             new_placement[part_to_zone[vertex_to_part[vertex]]].append(vertex)
+
+        if self._only_specify_gate_qubits:
+            implementable_commands, _ = filter_implementable_commands(
+                TrapConfiguration(n_qubits, new_placement),
+                dyn_arch.gate_zones,
+                remaining_commands,
+            )
+            return get_placement_of_implementable_qubits(
+                new_placement, implementable_commands
+            )
         return new_placement
 
     def handle_only_single_qubit_gates_remaining(
@@ -126,7 +145,8 @@ class GraphPartitionGateSelector(GateSelector):
             dyn_arch, self._cost_model, remaining_commands, qubit_tracker
         )
         # Now move any unused qubits to vacant spots in new config
-        handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
+        if not self._only_specify_gate_qubits:
+            handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
         return qubit_tracker.new_placement()
 
     def get_circuit_shuttle_graph_data(
@@ -245,3 +265,18 @@ class GraphPartitionGateSelector(GateSelector):
         if move_result_1:
             return move_result_1.path_cost
         raise ValueError("Could note determine path")
+
+
+def get_placement_of_implementable_qubits(
+    target_placement: ZonePlacement,
+    implementable_commands: list[Command],
+) -> ZonePlacement:
+    implementable_qubits: set[int] = set()
+
+    for cmd in implementable_commands:
+        implementable_qubits.update(qubit.index[0] for qubit in cmd.args)
+
+    return [
+        [qubit for qubit in zone_qubits if qubit in implementable_qubits]
+        for zone_qubits in target_placement
+    ]
