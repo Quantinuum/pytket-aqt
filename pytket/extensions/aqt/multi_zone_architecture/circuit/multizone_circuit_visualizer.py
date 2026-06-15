@@ -33,7 +33,7 @@ from ..trap_architecture.architecture_portgraph import (
 from .multizone_circuit import MultiZoneCircuit, ValidationError
 
 _SVG_WIDTH = 1280
-_SVG_HEIGHT = 760
+_SVG_HEIGHT = 1280
 _LAYOUT_MARGIN_X = 64
 _LAYOUT_MARGIN_Y = 88
 _ZONE_GAP_X = 24
@@ -599,7 +599,7 @@ def generate_multi_zone_circuit_movie_html(
     .movie-layout {{
       display: flex;
       gap: 18px;
-      align-items: flex-start;
+      align-items: stretch;
     }}
     .operations-panel {{
       width: 340px;
@@ -1507,6 +1507,23 @@ def write_multi_zone_circuit_movie_html(  # noqa PLR0913
 
 def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
     zone_width, zone_height = _zone_dimensions(circuit)
+    visualization_positions = _fitted_visualization_positions(
+        circuit, zone_width, zone_height
+    )
+    if ("zone", 0) in visualization_positions:
+        centers = {
+            zone: visualization_positions[("zone", zone)]
+            for zone in range(circuit.architecture.n_zones)
+        }
+        orientations = _best_non_linear_zone_orientations(circuit, centers)
+        return _zone_layout_from_centers(
+            circuit,
+            centers=centers,
+            orientations=orientations,
+            zone_width=zone_width,
+            zone_height=zone_height,
+        )
+
     if circuit.macro_arch.is_linear_architecture:
         return _wrapped_linear_zone_layout(
             circuit,
@@ -1552,7 +1569,23 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
         box_sizes,
         min_border_gap=_NON_LINEAR_ZONE_BORDER_GAP,
     )
+    return _zone_layout_from_centers(
+        circuit,
+        centers=centers,
+        orientations=orientations,
+        zone_width=zone_width,
+        zone_height=zone_height,
+    )
 
+
+def _zone_layout_from_centers(
+    circuit: MultiZoneCircuit,
+    *,
+    centers: dict[int, tuple[float, float]],
+    orientations: dict[int, int],
+    zone_width: float,
+    zone_height: float,
+) -> list[dict[str, Any]]:
     zones: list[dict[str, Any]] = []
     for zone in range(circuit.architecture.n_zones):
         center_x, center_y = centers[zone]
@@ -1596,6 +1629,26 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
 def _junction_layout(
     circuit: MultiZoneCircuit, zones: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
+    zone_width, zone_height = _zone_dimensions(circuit)
+    visualization_positions = _fitted_visualization_positions(
+        circuit, zone_width, zone_height
+    )
+    if circuit.architecture.visualization is not None and (
+        circuit.architecture.visualization.junction_positions
+    ):
+        return [
+            {
+                "id": junction.junction_id,
+                "x": round(
+                    visualization_positions[("junction", junction.junction_id)][0], 2
+                ),
+                "y": round(
+                    visualization_positions[("junction", junction.junction_id)][1], 2
+                ),
+            }
+            for junction in circuit.architecture.junctions
+        ]
+
     zone_map = {zone["id"]: zone for zone in zones}
     junction_positions: dict[int, tuple[float, float]] = {}
     fallback = (_SVG_WIDTH / 2, _SVG_HEIGHT / 2)
@@ -1636,6 +1689,48 @@ def _junction_layout(
         }
         for junction in circuit.architecture.junctions
     ]
+
+
+def _fitted_visualization_positions(
+    circuit: MultiZoneCircuit, zone_width: float, zone_height: float
+) -> dict[tuple[str, int], tuple[float, float]]:
+    visualization = circuit.architecture.visualization
+    if visualization is None:
+        return {}
+
+    raw_positions: dict[tuple[str, int], tuple[float, float]] = {}
+    for zone, position in visualization.zone_positions.items():
+        raw_positions[("zone", zone)] = (position.x, position.y)
+    for junction, position in visualization.junction_positions.items():
+        raw_positions[("junction", junction)] = (position.x, position.y)
+    if not raw_positions:
+        return {}
+
+    xs = [position[0] for position in raw_positions.values()]
+    ys = [position[1] for position in raw_positions.values()]
+    min_x, max_x = min(xs), max(xs)
+    min_y, max_y = min(ys), max(ys)
+    span_x = max_x - min_x
+    span_y = max_y - min_y
+    fitted_width = _SVG_WIDTH - zone_width - (2 * _LAYOUT_MARGIN_X)
+    fitted_height = _SVG_HEIGHT - zone_height - (2 * _LAYOUT_MARGIN_Y)
+    scale_candidates = []
+    if span_x > 0:
+        scale_candidates.append(fitted_width / span_x)
+    if span_y > 0:
+        scale_candidates.append(fitted_height / span_y)
+    scale = min(scale_candidates, default=1.0)
+    source_center_x = (min_x + max_x) / 2
+    source_center_y = (min_y + max_y) / 2
+    target_center_x = _SVG_WIDTH / 2
+    target_center_y = _SVG_HEIGHT / 2
+    return {
+        key: (
+            target_center_x + ((position[0] - source_center_x) * scale),
+            target_center_y + ((position[1] - source_center_y) * scale),
+        )
+        for key, position in raw_positions.items()
+    }
 
 
 def _connection_has_junction_endpoint(connection: Any, junction_id: int) -> bool:

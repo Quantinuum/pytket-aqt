@@ -124,6 +124,30 @@ class Zone(BaseModel):
         return self
 
 
+class LayoutPosition(BaseModel):
+    """Coordinates for visualizing an architecture element."""
+
+    model_config = ConfigDict(extra="forbid")
+
+    x: float
+    y: float
+
+
+class VisualizationSpec(BaseModel):
+    """Optional architecture layout information for visualizations.
+
+    Coordinates are interpreted as abstract layout units rather than pixels.
+    When supplied, the visualizer scales and translates them to fit the
+    available SVG area. Position dictionaries are keyed by zone ID or junction
+    ID.
+    """
+
+    model_config = ConfigDict(extra="forbid")
+
+    zone_positions: dict[int, LayoutPosition] = {}
+    junction_positions: dict[int, LayoutPosition] = {}
+
+
 class MultiZoneArchitectureSpec(BaseModel):
     """Specification of a physical multi-zone trap architecture.
 
@@ -143,6 +167,15 @@ class MultiZoneArchitectureSpec(BaseModel):
     ports connected by any physical route, using the cheapest route cost when
     multiple routes exist. Downstream routing models consume this expanded
     representation via `port_to_port_connections`.
+
+    The optional `visualization` field can be used to provide a preferred
+    physical layout for visualizers. It contains dictionaries of
+    `LayoutPosition` objects keyed by zone ID and junction ID. These positions
+    are abstract coordinates rather than pixels, and each coordinate denotes
+    the center of the corresponding zone or junction. Zone and junction
+    positions are interpreted in the same coordinate system, so equal x or y
+    values keep those elements aligned when the visualizer scales and
+    translates the layout to fit its canvas.
     """
 
     model_config = ConfigDict(extra="forbid")
@@ -152,6 +185,7 @@ class MultiZoneArchitectureSpec(BaseModel):
     zones: list[Zone]
     junctions: list[Junction] = []
     connections: list[PhysicalConnection] = []
+    visualization: VisualizationSpec | None = None
 
     _port_to_port_connections: list[ZoneConnection] = PrivateAttr(default_factory=list)
 
@@ -161,9 +195,38 @@ class MultiZoneArchitectureSpec(BaseModel):
             raise ValueError(
                 f"Multi-zone architecture defined to have {self.n_zones} zones, but {len(self.zones)} zones were defined."
             )
+        self._validate_visualization_spec()
         self._validate_physical_connections()
         self._port_to_port_connections = self._compute_port_to_port_connections()
         return self
+
+    def _validate_visualization_spec(self) -> None:
+        if self.visualization is None:
+            return
+        self._validate_visualization_positions(
+            element="zone",
+            positions=self.visualization.zone_positions,
+            expected_ids=set(range(self.n_zones)),
+        )
+        self._validate_visualization_positions(
+            element="junction",
+            positions=self.visualization.junction_positions,
+            expected_ids={junction.junction_id for junction in self.junctions},
+        )
+
+    @staticmethod
+    def _validate_visualization_positions(
+        element: str,
+        positions: dict[int, LayoutPosition],
+        expected_ids: set[int],
+    ) -> None:
+        if not positions:
+            return
+        position_ids = set(positions)
+        if position_ids != expected_ids:
+            raise ValueError(
+                f"Visualization spec defines {element} positions for IDs {sorted(position_ids)}, but expected IDs {sorted(expected_ids)}."
+            )
 
     def _validate_port_spec(self, port_spec: PortSpec) -> None:
         if port_spec.zone_id < 0 or port_spec.zone_id >= self.n_zones:

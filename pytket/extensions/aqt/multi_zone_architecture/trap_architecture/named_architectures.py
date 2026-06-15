@@ -17,11 +17,13 @@
 from .architecture import (
     Junction,
     JunctionRef,
+    LayoutPosition,
     MultiZoneArchitectureSpec,
     Operation,
     PhysicalConnection,
     PortId,
     PortSpec,
+    VisualizationSpec,
     Zone,
 )
 
@@ -217,6 +219,33 @@ grid12_connections = [
     for junction_id, zone_ports in enumerate(grid12_junction_groups)
     for connection in get_junction_connections(junction_id, zone_ports)
 ]
+grid12_visualization = VisualizationSpec(
+    zone_positions={
+        0: LayoutPosition(x=0.5, y=0.0),
+        1: LayoutPosition(x=1.5, y=0.0),
+        2: LayoutPosition(x=0.0, y=0.5),
+        3: LayoutPosition(x=1.0, y=0.5),
+        4: LayoutPosition(x=2.0, y=0.5),
+        5: LayoutPosition(x=0.5, y=1.0),
+        6: LayoutPosition(x=1.5, y=1.0),
+        7: LayoutPosition(x=0.0, y=1.5),
+        8: LayoutPosition(x=1.0, y=1.5),
+        9: LayoutPosition(x=2.0, y=1.5),
+        10: LayoutPosition(x=0.5, y=2.0),
+        11: LayoutPosition(x=1.5, y=2.0),
+    },
+    junction_positions={
+        0: LayoutPosition(x=0.0, y=0.0),
+        1: LayoutPosition(x=1.0, y=0.0),
+        2: LayoutPosition(x=2.0, y=0.0),
+        3: LayoutPosition(x=0.0, y=1.0),
+        4: LayoutPosition(x=1.0, y=1.0),
+        5: LayoutPosition(x=2.0, y=1.0),
+        6: LayoutPosition(x=0.0, y=2.0),
+        7: LayoutPosition(x=1.0, y=2.0),
+        8: LayoutPosition(x=2.0, y=2.0),
+    },
+)
 
 grid12 = MultiZoneArchitectureSpec(
     n_qubits_max=32,
@@ -224,6 +253,7 @@ grid12 = MultiZoneArchitectureSpec(
     zones=[Zone(max_ions_gate_op=grid_zone_max_ion) for _ in range(12)],
     junctions=grid12_junctions,
     connections=grid12_connections,
+    visualization=grid12_visualization,
 )
 
 grid_zone_max_ion = 8
@@ -240,6 +270,7 @@ grid12_mod = MultiZoneArchitectureSpec(
     ],
     junctions=grid12_junctions,
     connections=grid12_connections,
+    visualization=grid12_visualization,
 )
 
 
@@ -283,6 +314,36 @@ gate_zone_type_junction_connections = [
     for junction_id, zone_ports in enumerate(gate_zone_type_junction_groups)
     for connection in get_junction_connections(junction_id, zone_ports)
 ]
+gate_zone_type_visualization = VisualizationSpec(
+    zone_positions={
+        0: LayoutPosition(x=0.0, y=0.0),
+        1: LayoutPosition(x=1.0, y=0.0),
+        2: LayoutPosition(x=2.0, y=0.0),
+        3: LayoutPosition(x=3.0, y=0.0),
+        4: LayoutPosition(x=4.0, y=0.0),
+        5: LayoutPosition(x=5.0, y=0.0),
+        6: LayoutPosition(x=1.5, y=0.5),
+        7: LayoutPosition(x=2.5, y=0.5),
+        8: LayoutPosition(x=2.0, y=1.0),
+        9: LayoutPosition(x=3.0, y=1.0),
+        10: LayoutPosition(x=4.0, y=1.0),
+        11: LayoutPosition(x=2.5, y=1.5),
+        12: LayoutPosition(x=2.0, y=2.0),
+        13: LayoutPosition(x=3.0, y=2.0),
+        14: LayoutPosition(x=2.5, y=2.5),
+    },
+    junction_positions={
+        0: LayoutPosition(x=0.5, y=0.0),
+        1: LayoutPosition(x=1.5, y=0.0),
+        2: LayoutPosition(x=2.5, y=0.0),
+        3: LayoutPosition(x=3.5, y=0.0),
+        4: LayoutPosition(x=4.5, y=0.0),
+        5: LayoutPosition(x=1.5, y=1.0),
+        6: LayoutPosition(x=2.5, y=1.0),
+        7: LayoutPosition(x=3.5, y=1.0),
+        8: LayoutPosition(x=2.5, y=2.0),
+    },
+)
 gate_zone_type_examples = MultiZoneArchitectureSpec(
     n_qubits_max=30,
     n_zones=n_zones,
@@ -298,4 +359,5 @@ gate_zone_type_examples = MultiZoneArchitectureSpec(
     connections=[
         *gate_zone_type_junction_connections,
     ],
+    visualization=gate_zone_type_visualization,
 )

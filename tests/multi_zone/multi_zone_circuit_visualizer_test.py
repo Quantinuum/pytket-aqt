@@ -28,6 +28,7 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit import (
 from pytket.extensions.aqt.multi_zone_architecture.circuit.multizone_circuit_visualizer import (
     _best_non_linear_zone_orientations,
     _enforce_minimum_zone_border_distance,
+    _junction_layout,
     _raw_port_positions,
     _slot_centers,
     _SlotLayout,
@@ -57,10 +58,12 @@ from pytket.extensions.aqt.multi_zone_architecture.initial_placement.settings im
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
     Junction,
     JunctionRef,
+    LayoutPosition,
     MultiZoneArchitectureSpec,
     PhysicalConnection,
     PortId,
     PortSpec,
+    VisualizationSpec,
     Zone,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
@@ -502,6 +505,73 @@ def test_build_multi_zone_circuit_movie_edges_include_port_anchors() -> None:
     assert all(zone["orientation"] == 0 for zone in movie.zones)
     assert all(zone["base_width"] == zone["width"] for zone in movie.zones)
     assert all(zone["base_height"] == zone["height"] for zone in movie.zones)
+
+
+def test_visualizer_uses_architecture_visualization_positions() -> None:
+    architecture = MultiZoneArchitectureSpec(
+        n_qubits_max=0,
+        n_zones=2,
+        zones=[Zone(max_ions_gate_op=2) for _ in range(2)],
+        junctions=[Junction(junction_id=0)],
+        connections=[
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p1),
+                endpoint1=JunctionRef(junction_id=0),
+            ),
+            PhysicalConnection(
+                endpoint0=JunctionRef(junction_id=0),
+                endpoint1=PortSpec(zone_id=1, port_id=PortId.p0),
+            ),
+        ],
+        visualization=VisualizationSpec(
+            zone_positions={
+                0: LayoutPosition(x=0.0, y=0.0),
+                1: LayoutPosition(x=10.0, y=0.0),
+            },
+            junction_positions={0: LayoutPosition(x=0.0, y=0.0)},
+        ),
+    )
+    circuit = MultiZoneCircuit(architecture, {}, 0)
+
+    zones = _zone_layout(circuit)
+    junctions = _junction_layout(circuit, zones)
+
+    assert zones[0]["center_x"] == junctions[0]["x"]
+    assert zones[0]["center_y"] == junctions[0]["y"]
+
+
+def test_visualizer_preserves_visualization_position_aspect_ratio() -> None:
+    architecture = MultiZoneArchitectureSpec(
+        n_qubits_max=0,
+        n_zones=2,
+        zones=[Zone(max_ions_gate_op=2) for _ in range(2)],
+        junctions=[Junction(junction_id=0)],
+        connections=[
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p1),
+                endpoint1=JunctionRef(junction_id=0),
+            ),
+            PhysicalConnection(
+                endpoint0=JunctionRef(junction_id=0),
+                endpoint1=PortSpec(zone_id=1, port_id=PortId.p0),
+            ),
+        ],
+        visualization=VisualizationSpec(
+            zone_positions={
+                0: LayoutPosition(x=0.0, y=0.0),
+                1: LayoutPosition(x=10.0, y=0.0),
+            },
+            junction_positions={0: LayoutPosition(x=0.0, y=5.0)},
+        ),
+    )
+    circuit = MultiZoneCircuit(architecture, {}, 0)
+
+    zones = _zone_layout(circuit)
+    junctions = _junction_layout(circuit, zones)
+
+    rendered_dx = abs(zones[1]["center_x"] - zones[0]["center_x"])
+    rendered_dy = abs(junctions[0]["y"] - zones[0]["center_y"])
+    assert rendered_dx == pytest.approx(2 * rendered_dy)
 
 
 def test_generate_multi_zone_circuit_movie_html_uses_custom_frame_duration() -> None:

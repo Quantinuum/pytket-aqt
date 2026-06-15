@@ -21,10 +21,12 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit.helpers import (
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
     Junction,
     JunctionRef,
+    LayoutPosition,
     MultiZoneArchitectureSpec,
     PhysicalConnection,
     PortId,
     PortSpec,
+    VisualizationSpec,
     Zone,
     ZoneConnection,
 )
@@ -36,6 +38,9 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.macro_archi
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     four_zones_in_a_line,
+    gate_zone_type_examples,
+    grid12,
+    grid12_mod,
 )
 
 
@@ -282,3 +287,50 @@ def test_old_junction_connections_field_is_rejected() -> None:
                 )
             ],
         )
+
+
+def test_visualization_spec_rejects_missing_or_unknown_positions() -> None:
+    with pytest.raises(ValueError, match="zone positions"):
+        MultiZoneArchitectureSpec(
+            n_qubits_max=2,
+            n_zones=2,
+            zones=[Zone(max_ions_gate_op=2) for _ in range(2)],
+            visualization=VisualizationSpec(
+                zone_positions={0: LayoutPosition(x=0.0, y=0.0)}
+            ),
+        )
+
+    with pytest.raises(ValueError, match="zone positions"):
+        MultiZoneArchitectureSpec(
+            n_qubits_max=2,
+            n_zones=2,
+            zones=[Zone(max_ions_gate_op=2) for _ in range(2)],
+            visualization=VisualizationSpec(
+                zone_positions={
+                    0: LayoutPosition(x=0.0, y=0.0),
+                    2: LayoutPosition(x=1.0, y=0.0),
+                }
+            ),
+        )
+
+    with pytest.raises(ValueError, match="junction positions"):
+        MultiZoneArchitectureSpec(
+            n_qubits_max=2,
+            n_zones=1,
+            zones=[Zone(max_ions_gate_op=2)],
+            junctions=[Junction(junction_id=0), Junction(junction_id=1)],
+            visualization=VisualizationSpec(
+                junction_positions={0: LayoutPosition(x=0.0, y=0.0)}
+            ),
+        )
+
+
+@pytest.mark.parametrize("architecture", [grid12, grid12_mod, gate_zone_type_examples])
+def test_named_non_linear_architectures_define_visualization_positions(
+    architecture: MultiZoneArchitectureSpec,
+) -> None:
+    assert architecture.visualization is not None
+    assert len(architecture.visualization.zone_positions) == architecture.n_zones
+    assert len(architecture.visualization.junction_positions) == len(
+        architecture.junctions
+    )
