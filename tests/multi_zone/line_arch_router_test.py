@@ -34,10 +34,10 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_ops i
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
     MultiZoneArchitectureSpec,
+    PhysicalConnection,
     PortId,
     PortSpec,
     Zone,
-    ZoneConnection,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     DynamicArch,
@@ -69,9 +69,9 @@ def _line_architecture(zone_gate_caps: list[int]) -> MultiZoneArchitectureSpec:
             for capacity in zone_gate_caps
         ],
         connections=[
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=zone, port_id=PortId.p1),
-                zone_port_spec1=PortSpec(zone_id=zone + 1, port_id=PortId.p0),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=zone, port_id=PortId.p1),
+                endpoint1=PortSpec(zone_id=zone + 1, port_id=PortId.p0),
             )
             for zone in range(len(zone_gate_caps) - 1)
         ],

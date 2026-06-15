@@ -41,8 +41,9 @@ class MultiZoneArch:
     def __init__(self, spec: MultiZoneArchitectureSpec):
         self.zone_graph: Graph = Graph()
         self.shortest_paths: dict[tuple[int, int], tuple[int, list[int]] | None] = {}
-        self.zone_connections: list[list[int]] = [[]] * spec.n_zones
+        self.zone_connections: list[list[int]] = [[] for _ in range(spec.n_zones)]
         self.connection_ports: dict[tuple[int, int], tuple[PortId, PortId]] = {}
+        self.connection_costs: dict[tuple[int, int], int] = {}
         self.memory_zones: list[int] = []
         self.gate_zones: list[int] = []
 
@@ -59,23 +60,30 @@ class MultiZoneArch:
             self.has_memory_zones = len(self.memory_zones) > 0
             # The zone port graph treats the ports of each zone as separate nodes int the graph
 
-        for connection in spec.connections:
+        for connection in spec.port_to_port_connections:
             zone0 = connection.zone_port_spec0.zone_id
             port0 = connection.zone_port_spec0.port_id
             zone1 = connection.zone_port_spec1.zone_id
             port1 = connection.zone_port_spec1.port_id
+            shuttle_cost = connection.shuttle_cost
 
-            self.zone_connections[zone0].append(zone1)
-            self.zone_connections[zone1].append(zone0)
             if (zone0, zone1) not in self.connection_ports:
+                self.zone_connections[zone0].append(zone1)
+                self.zone_connections[zone1].append(zone0)
                 self.connection_ports[(zone0, zone1)] = (port0, port1)
                 self.connection_ports[(zone1, zone0)] = (port1, port0)
-            else:
-                raise ValueError(
-                    f"Two connections between zones {zone0} and {zone1}"
-                    f" specified, but only 1 connection between two zones is allowed"
+                self.connection_costs[(zone0, zone1)] = shuttle_cost
+                self.connection_costs[(zone1, zone0)] = shuttle_cost
+            elif shuttle_cost < self.connection_costs[(zone0, zone1)]:
+                self.connection_ports[(zone0, zone1)] = (port0, port1)
+                self.connection_ports[(zone1, zone0)] = (port1, port0)
+                self.connection_costs[(zone0, zone1)] = shuttle_cost
+                self.connection_costs[(zone1, zone0)] = shuttle_cost
+            current_edge = self.zone_graph.get_edge_data(int(zone0), int(zone1))
+            if current_edge is None or shuttle_cost < current_edge["transport_cost"]:
+                self.zone_graph.add_edge(
+                    int(zone0), int(zone1), transport_cost=shuttle_cost
                 )
-            self.zone_graph.add_edge(int(zone0), int(zone1), transport_cost=1)
         self.is_linear_architecture = self._check_is_linear_architecture()
 
     def _check_is_linear_architecture(self) -> bool:

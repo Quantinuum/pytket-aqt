@@ -90,7 +90,7 @@ class MultiZonePortGraph:
             )
 
         # Add "shuttle" edges between connected zones.
-        for connection in spec.connections:
+        for connection in spec.port_to_port_connections:
             zone0 = connection.zone_port_spec0.zone_id
             port0 = connection.zone_port_spec0.port_id
             portid0 = zone_port_to_port_id(zone0, port0.value)
@@ -99,7 +99,10 @@ class MultiZonePortGraph:
             portid1 = zone_port_to_port_id(zone1, port1.value)
             # TODO: update arch spec to include connection shuttle cost and use that as weight
             self.port_graph.add_edge(
-                portid0, portid1, transport_cost=1, is_shuttle_edge=True
+                portid0,
+                portid1,
+                transport_cost=connection.shuttle_cost,
+                is_shuttle_edge=True,
             )
 
         self._path_cache: dict[

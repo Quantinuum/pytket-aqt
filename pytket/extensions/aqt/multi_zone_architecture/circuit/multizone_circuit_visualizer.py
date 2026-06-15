@@ -1661,7 +1661,7 @@ def _raw_port_positions(
             zone_port_to_port_id(zone, 1),
             weight=_PORT_GRAPH_INTERNAL_WEIGHT,
         )
-    for connection in circuit.architecture.connections:
+    for connection in circuit.architecture.port_to_port_connections:
         zone0 = connection.zone_port_spec0.zone_id
         port0 = connection.zone_port_spec0.port_id.value
         zone1 = connection.zone_port_spec1.zone_id

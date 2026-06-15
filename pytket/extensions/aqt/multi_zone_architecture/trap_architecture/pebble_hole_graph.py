@@ -55,7 +55,7 @@ class PebbleHoleGraph:
                 self.pebble_graph.add_edge((zone_id, i), (zone_id, i + 1))
 
         # Add "shuttle" edges between connected zones.
-        for connection in spec.connections:
+        for connection in spec.port_to_port_connections:
             zone0 = connection.zone_port_spec0.zone_id
             port0 = connection.zone_port_spec0.port_id
             node0 = (
@@ -69,7 +69,10 @@ class PebbleHoleGraph:
                 0 if port1 == PortId.p0 else self._zone_capacities[zone1] - 1,
             )
             self.pebble_graph.add_edge(
-                node0, node1, transport_cost=1, is_shuttle_edge=True
+                node0,
+                node1,
+                transport_cost=connection.shuttle_cost,
+                is_shuttle_edge=True,
             )
 
     def occupant(self, node: Node) -> int:

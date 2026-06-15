@@ -26,10 +26,10 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.routing_ops i
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
     MultiZoneArchitectureSpec,
+    PhysicalConnection,
     PortId,
     PortSpec,
     Zone,
-    ZoneConnection,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     SgzlDynamicArch,
@@ -57,9 +57,9 @@ def _siqci_like_architecture(gate_zone: int) -> MultiZoneArchitectureSpec:
             for i in range(5)
         ],
         connections=[
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-                zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=i, port_id=PortId.p1),
+                endpoint1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
             )
             for i in range(4)
         ],

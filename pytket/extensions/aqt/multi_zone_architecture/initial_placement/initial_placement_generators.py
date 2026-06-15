@@ -197,11 +197,11 @@ class GraphMapInitialPlacement(InitialPlacementGenerator):
         arch_vertex_weights = [1] * n_vertices
         arch_edges = []
         arch_edge_weights = []
-        for connection in arch.connections:
+        for connection in arch.port_to_port_connections:
             arch_edges.append(
                 (connection.zone_port_spec0.zone_id, connection.zone_port_spec1.zone_id)
             )
-            arch_edge_weights.append(1)
+            arch_edge_weights.append(connection.shuttle_cost)
         return GraphData(n_vertices, arch_vertex_weights, arch_edges, arch_edge_weights)
 
 

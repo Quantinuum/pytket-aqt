@@ -14,21 +14,59 @@
 
 """Pre-defined named multi-zone architectures for use in multi-zone circuits"""
 
-from itertools import combinations
-
 from .architecture import (
+    Junction,
+    JunctionRef,
     MultiZoneArchitectureSpec,
     Operation,
+    PhysicalConnection,
     PortId,
     PortSpec,
     Zone,
-    ZoneConnection,
 )
 
 standardOperations = [
     Operation(operation_spec="[X, t, [self, o, p]]", fidelity="0.993"),
     Operation(operation_spec="[MS, t, [[self, o, p], [self, o, p]]]", fidelity="0.983"),
 ]
+
+
+def _port(zone_id: int, port_id: PortId) -> PortSpec:
+    return PortSpec(zone_id=zone_id, port_id=port_id)
+
+
+def _junction(junction_id: int) -> JunctionRef:
+    return JunctionRef(junction_id=junction_id)
+
+
+def get_direct_physical_connections(
+    zone_ports: list[tuple[int, PortId, int, PortId]],
+) -> list[PhysicalConnection]:
+    return [
+        PhysicalConnection(
+            endpoint0=_port(zone0, port0),
+            endpoint1=_port(zone1, port1),
+        )
+        for zone0, port0, zone1, port1 in zone_ports
+    ]
+
+
+def get_linear_connections(n_zones: int) -> list[PhysicalConnection]:
+    return get_direct_physical_connections(
+        [(i, PortId.p1, i + 1, PortId.p0) for i in range(n_zones - 1)]
+    )
+
+
+def get_junction_connections(
+    junction_id: int, zone_ports: list[tuple[int, PortId]]
+) -> list[PhysicalConnection]:
+    return [
+        PhysicalConnection(
+            endpoint0=_port(zone_id, port_id),
+            endpoint1=_junction(junction_id),
+        )
+        for zone_id, port_id in zone_ports
+    ]
 
 
 four_zones_in_a_line = MultiZoneArchitectureSpec(
@@ -38,13 +76,7 @@ four_zones_in_a_line = MultiZoneArchitectureSpec(
         Zone(max_ions_gate_op=mi, memory_only=mem)
         for mi, mem in [(8, True), (6, False), (6, False), (8, True)]
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-        )
-        for i in range(3)
-    ],
+    connections=get_linear_connections(4),
 )
 
 _SIQCI_GATE_ZONE = 3
@@ -59,13 +91,7 @@ siqci_arch = MultiZoneArchitectureSpec(
         )
         for i in range(5)
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-        )
-        for i in range(4)
-    ],
+    connections=get_linear_connections(5),
 )
 
 _SIQCI_GATE_ZONE_MIDDLE = 2
@@ -80,13 +106,7 @@ siqci_arch_g2 = MultiZoneArchitectureSpec(
         )
         for i in range(5)
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-        )
-        for i in range(4)
-    ],
+    connections=get_linear_connections(5),
 )
 
 _SIQCI_GATE_ZONE_EDGE = 4
@@ -101,13 +121,7 @@ siqci_arch_g4 = MultiZoneArchitectureSpec(
         )
         for i in range(5)
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-        )
-        for i in range(4)
-    ],
+    connections=get_linear_connections(5),
 )
 
 _LINEAR_8_ZONES_GATE_ZONE = 3
@@ -123,13 +137,7 @@ linear_8_zones = MultiZoneArchitectureSpec(
         )
         for i in range(8)
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-        )
-        for i in range(7)
-    ],
+    connections=get_linear_connections(8),
 )
 
 _LINEAR_9_ZONES_GATE_ZONE = 4
@@ -145,13 +153,7 @@ linear_9_zones = MultiZoneArchitectureSpec(
         )
         for i in range(9)
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-        )
-        for i in range(8)
-    ],
+    connections=get_linear_connections(9),
 )
 
 
@@ -160,13 +162,9 @@ racetrack = MultiZoneArchitectureSpec(
     n_qubits_max=84,
     n_zones=28,
     zones=[Zone(max_ions_gate_op=racetrack_max_ions) for _ in range(28)],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i % 28, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=(i + 1) % 28, port_id=PortId.p0),
-        )
-        for i in range(28)
-    ],
+    connections=get_direct_physical_connections(
+        [(i % 28, PortId.p1, (i + 1) % 28, PortId.p0) for i in range(28)]
+    ),
 )
 
 racetrack_4_gatezones = MultiZoneArchitectureSpec(
@@ -180,28 +178,10 @@ racetrack_4_gatezones = MultiZoneArchitectureSpec(
         )
         for i in range(28)
     ],
-    connections=[
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=i % 28, port_id=PortId.p1),
-            zone_port_spec1=PortSpec(zone_id=(i + 1) % 28, port_id=PortId.p0),
-        )
-        for i in range(28)
-    ],
+    connections=get_direct_physical_connections(
+        [(i % 28, PortId.p1, (i + 1) % 28, PortId.p0) for i in range(28)]
+    ),
 )
-
-
-def get_all_to_all_port_connections(
-    zone_ports: list[tuple[int, PortId]],
-) -> list[ZoneConnection]:
-    """Return a list of ZoneConnections connecting
-    all the zone ports in the given list"""
-    return [
-        ZoneConnection(
-            zone_port_spec0=PortSpec(zone_id=zone_port0[0], port_id=zone_port0[1]),
-            zone_port_spec1=PortSpec(zone_id=zone_port1[0], port_id=zone_port1[1]),
-        )
-        for zone_port0, zone_port1 in combinations(zone_ports, 2)
-    ]
 
 
 """
@@ -217,23 +197,33 @@ for horizontal zones port 0 is left, port 1 is right
 for vertical zones port 0 is up, port 1 is down
 """
 grid_zone_max_ion = 8
+grid12_junction_groups = [
+    [(0, PortId.p0), (2, PortId.p0)],
+    [(0, PortId.p1), (1, PortId.p0), (3, PortId.p0)],
+    [(1, PortId.p1), (4, PortId.p0)],
+    [(2, PortId.p1), (5, PortId.p0), (7, PortId.p0)],
+    [(3, PortId.p1), (6, PortId.p0), (5, PortId.p1), (8, PortId.p0)],
+    [(6, PortId.p1), (4, PortId.p1), (9, PortId.p0)],
+    [(7, PortId.p1), (10, PortId.p0)],
+    [(8, PortId.p1), (10, PortId.p1), (11, PortId.p0)],
+    [(9, PortId.p1), (11, PortId.p1)],
+]
+grid12_junctions = [
+    Junction(junction_id=junction_id)
+    for junction_id in range(len(grid12_junction_groups))
+]
+grid12_connections = [
+    connection
+    for junction_id, zone_ports in enumerate(grid12_junction_groups)
+    for connection in get_junction_connections(junction_id, zone_ports)
+]
+
 grid12 = MultiZoneArchitectureSpec(
     n_qubits_max=32,
     n_zones=12,
     zones=[Zone(max_ions_gate_op=grid_zone_max_ion) for _ in range(12)],
-    connections=get_all_to_all_port_connections([(0, PortId.p0), (2, PortId.p0)])
-    + get_all_to_all_port_connections([(0, PortId.p1), (1, PortId.p0), (3, PortId.p0)])
-    + get_all_to_all_port_connections([(1, PortId.p1), (4, PortId.p0)])
-    + get_all_to_all_port_connections([(2, PortId.p1), (5, PortId.p0), (7, PortId.p0)])
-    + get_all_to_all_port_connections(
-        [(3, PortId.p1), (6, PortId.p0), (5, PortId.p1), (8, PortId.p0)]
-    )
-    + get_all_to_all_port_connections([(6, PortId.p1), (4, PortId.p1), (9, PortId.p0)])
-    + get_all_to_all_port_connections([(7, PortId.p1), (10, PortId.p0)])
-    + get_all_to_all_port_connections(
-        [(8, PortId.p1), (10, PortId.p1), (11, PortId.p0)]
-    )
-    + get_all_to_all_port_connections([(9, PortId.p1), (11, PortId.p1)]),
+    junctions=grid12_junctions,
+    connections=grid12_connections,
 )
 
 grid_zone_max_ion = 8
@@ -248,19 +238,8 @@ grid12_mod = MultiZoneArchitectureSpec(
         )
         for i in range(12)
     ],
-    connections=get_all_to_all_port_connections([(0, PortId.p0), (2, PortId.p0)])
-    + get_all_to_all_port_connections([(0, PortId.p1), (1, PortId.p0), (3, PortId.p0)])
-    + get_all_to_all_port_connections([(1, PortId.p1), (4, PortId.p0)])
-    + get_all_to_all_port_connections([(2, PortId.p1), (5, PortId.p0), (7, PortId.p0)])
-    + get_all_to_all_port_connections(
-        [(3, PortId.p1), (6, PortId.p0), (5, PortId.p1), (8, PortId.p0)]
-    )
-    + get_all_to_all_port_connections([(6, PortId.p1), (4, PortId.p1), (9, PortId.p0)])
-    + get_all_to_all_port_connections([(7, PortId.p1), (10, PortId.p0)])
-    + get_all_to_all_port_connections(
-        [(8, PortId.p1), (10, PortId.p1), (11, PortId.p0)]
-    )
-    + get_all_to_all_port_connections([(9, PortId.p1), (11, PortId.p1)]),
+    junctions=grid12_junctions,
+    connections=grid12_connections,
 )
 
 
@@ -284,6 +263,21 @@ for vertical zones port 0 is up, port 1 is down
 """
 n_zones = 15
 zone_max = 4
+gate_zone_type_junction_groups = [
+    [(1, PortId.p1), (2, PortId.p0), (6, PortId.p0)],
+    [(3, PortId.p1), (4, PortId.p0), (7, PortId.p0)],
+    [(8, PortId.p1), (9, PortId.p0), (7, PortId.p1), (11, PortId.p0)],
+    [(12, PortId.p1), (13, PortId.p0), (11, PortId.p1), (14, PortId.p0)],
+]
+gate_zone_type_junctions = [
+    Junction(junction_id=junction_id)
+    for junction_id in range(len(gate_zone_type_junction_groups))
+]
+gate_zone_type_junction_connections = [
+    connection
+    for junction_id, zone_ports in enumerate(gate_zone_type_junction_groups)
+    for connection in get_junction_connections(junction_id, zone_ports)
+]
 gate_zone_type_examples = MultiZoneArchitectureSpec(
     n_qubits_max=30,
     n_zones=n_zones,
@@ -295,38 +289,17 @@ gate_zone_type_examples = MultiZoneArchitectureSpec(
         )
         for i in range(n_zones)
     ],
+    junctions=gate_zone_type_junctions,
     connections=[
-        # horizontal connections
-        *[
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=i, port_id=PortId.p1),
-                zone_port_spec1=PortSpec(zone_id=i + 1, port_id=PortId.p0),
-            )
-            for i in [0, 1, 2, 3, 4, 8, 9, 12]
-        ],
-        # vertical connections
-        *[
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=i, port_id=pi),
-                zone_port_spec1=PortSpec(zone_id=j, port_id=pj),
-            )
-            for i, pi, j, pj in [
-                (1, PortId.p1, 6, PortId.p0),
-                (2, PortId.p0, 6, PortId.p0),
+        *get_direct_physical_connections(
+            [
+                (0, PortId.p1, 1, PortId.p0),
+                (2, PortId.p1, 3, PortId.p0),
+                (4, PortId.p1, 5, PortId.p0),
                 (8, PortId.p0, 6, PortId.p1),
-                (3, PortId.p1, 7, PortId.p0),
-                (4, PortId.p0, 7, PortId.p0),
-                (8, PortId.p1, 7, PortId.p1),
-                (9, PortId.p0, 7, PortId.p1),
-                (11, PortId.p0, 7, PortId.p1),
-                (8, PortId.p1, 11, PortId.p0),
-                (9, PortId.p0, 11, PortId.p0),
-                (12, PortId.p1, 11, PortId.p1),
-                (13, PortId.p0, 11, PortId.p1),
-                (14, PortId.p0, 11, PortId.p1),
-                (12, PortId.p1, 14, PortId.p0),
-                (13, PortId.p0, 14, PortId.p0),
+                (9, PortId.p1, 10, PortId.p0),
             ]
-        ],
+        ),
+        *gate_zone_type_junction_connections,
     ],
 )

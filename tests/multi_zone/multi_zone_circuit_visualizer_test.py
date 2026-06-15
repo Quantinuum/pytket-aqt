@@ -55,11 +55,13 @@ from pytket.extensions.aqt.multi_zone_architecture.initial_placement.settings im
     InitialPlacementSettings,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architecture import (
+    Junction,
+    JunctionRef,
     MultiZoneArchitectureSpec,
+    PhysicalConnection,
     PortId,
     PortSpec,
     Zone,
-    ZoneConnection,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
     four_zones_in_a_line,
@@ -153,13 +155,13 @@ def _branching_orientation_test_circuit() -> MultiZoneCircuit:
         n_zones=3,
         zones=[Zone(max_ions_gate_op=2) for _ in range(3)],
         connections=[
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p0),
-                zone_port_spec1=PortSpec(zone_id=1, port_id=PortId.p1),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p0),
+                endpoint1=PortSpec(zone_id=1, port_id=PortId.p1),
             ),
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p1),
-                zone_port_spec1=PortSpec(zone_id=2, port_id=PortId.p0),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p1),
+                endpoint1=PortSpec(zone_id=2, port_id=PortId.p0),
             ),
         ],
     )
@@ -171,18 +173,23 @@ def _branched_port_layout_test_circuit() -> MultiZoneCircuit:
         n_qubits_max=0,
         n_zones=4,
         zones=[Zone(max_ions_gate_op=2) for _ in range(4)],
+        junctions=[Junction(junction_id=0)],
         connections=[
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p0),
-                zone_port_spec1=PortSpec(zone_id=1, port_id=PortId.p1),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p0),
+                endpoint1=PortSpec(zone_id=1, port_id=PortId.p1),
             ),
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p1),
-                zone_port_spec1=PortSpec(zone_id=2, port_id=PortId.p0),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p1),
+                endpoint1=JunctionRef(junction_id=0),
             ),
-            ZoneConnection(
-                zone_port_spec0=PortSpec(zone_id=0, port_id=PortId.p1),
-                zone_port_spec1=PortSpec(zone_id=3, port_id=PortId.p0),
+            PhysicalConnection(
+                endpoint0=JunctionRef(junction_id=0),
+                endpoint1=PortSpec(zone_id=2, port_id=PortId.p0),
+            ),
+            PhysicalConnection(
+                endpoint0=JunctionRef(junction_id=0),
+                endpoint1=PortSpec(zone_id=3, port_id=PortId.p0),
             ),
         ],
     )
@@ -648,7 +655,7 @@ def test_visualizer_handles_routed_non_linear_architectures(
 
     assert circuit.macro_arch.is_linear_architecture is False
     assert len(movie.zones) == architecture.n_zones
-    assert len(movie.edges) == len(architecture.connections)
+    assert len(movie.edges) == len(architecture.port_to_port_connections)
     assert len(movie.frames) > 1
     assert any(frame.kind == "gate" for frame in movie.frames)
     assert any(frame.kind in {"shuttle", "pswap"} for frame in movie.frames)
