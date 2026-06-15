@@ -21,10 +21,11 @@ from html import escape
 from pathlib import Path
 from typing import Any
 
-from networkx import Graph, spring_layout
+from networkx import DiGraph, Graph, single_source_dijkstra, spring_layout
+from networkx.exception import NetworkXException
 from pytket.circuit import OpType
 
-from ..trap_architecture.architecture import PortId
+from ..trap_architecture.architecture import JunctionRef, PortId, PortSpec
 from ..trap_architecture.architecture_portgraph import (
     port_id_to_zone_port,
     zone_port_to_port_id,
@@ -87,7 +88,8 @@ class MultiZoneCircuitMovie:
     title: str
     n_qubits: int
     zones: list[dict[str, Any]]
-    edges: list[dict[str, int]]
+    junctions: list[dict[str, Any]]
+    edges: list[dict[str, Any]]
     frames: list[MultiZoneCircuitMovieFrame]
 
 
@@ -129,6 +131,7 @@ def build_multi_zone_circuit_movie(
             "Multi-zone circuit movie generation requires a compiled routed circuit."
         )
     zones = _zone_layout(circuit)
+    junctions = _junction_layout(circuit, zones)
     gate_zone_colors = _gate_zone_color_map(circuit)
     for zone in zones:
         if zone["is_gate_zone"]:
@@ -137,16 +140,10 @@ def build_multi_zone_circuit_movie(
             zone["gate_qubit_color"] = gate_zone_colors[zone["id"]]["qubit"]
     edges = [
         {
-            "source": int(source_zone),
-            "target": int(target_zone),
-            "source_port": circuit.macro_arch.get_connected_ports(
-                int(source_zone), int(target_zone)
-            )[0].value,
-            "target_port": circuit.macro_arch.get_connected_ports(
-                int(source_zone), int(target_zone)
-            )[1].value,
+            "source": _physical_endpoint_data(connection.endpoint0),
+            "target": _physical_endpoint_data(connection.endpoint1),
         }
-        for source_zone, target_zone in circuit.macro_arch.zone_graph.edges()
+        for connection in circuit.architecture.connections
     ]
     frames = build_multi_zone_circuit_movie_frames(
         circuit,
@@ -157,6 +154,7 @@ def build_multi_zone_circuit_movie(
         title="Multi-Zone Circuit Movie" if title is None else title,
         n_qubits=circuit.pytket_circuit.n_qubits,
         zones=zones,
+        junctions=junctions,
         edges=edges,
         frames=frames,
     )
@@ -240,6 +238,13 @@ def _build_raw_multi_zone_circuit_movie_frames(
                     "target_zone": target_zone,
                     "source_port": source_port,
                     "target_port": target_port,
+                    "path": _shuttle_physical_path(
+                        circuit,
+                        source_zone,
+                        source_port,
+                        target_zone,
+                        target_port,
+                    ),
                     "qubits": [arg.index[0] for arg in cmd.args],
                 },
             )
@@ -410,6 +415,82 @@ def _format_shuttle_command_text(cmd: Any) -> str:
     return f"SHUTTLE({source_zone}→{target_zone}) {qubit_text};"
 
 
+def _physical_endpoint_data(endpoint: PortSpec | JunctionRef) -> dict[str, int | str]:
+    if isinstance(endpoint, PortSpec):
+        return {
+            "kind": "port",
+            "zone": endpoint.zone_id,
+            "port": endpoint.port_id.value,
+        }
+    return {"kind": "junction", "junction": endpoint.junction_id}
+
+
+def _physical_node_data(node: tuple[str, int, int | None]) -> dict[str, int | str]:
+    if node[0] == "port":
+        assert node[2] is not None
+        return {"kind": "port", "zone": node[1], "port": node[2]}
+    return {"kind": "junction", "junction": node[1]}
+
+
+def _shuttle_physical_path(
+    circuit: MultiZoneCircuit,
+    source_zone: int,
+    source_port: int,
+    target_zone: int,
+    target_port: int,
+) -> list[dict[str, int | str]]:
+    source_node = ("port", source_zone, source_port)
+    target_node = ("port", target_zone, target_port)
+    try:
+        _, path = single_source_dijkstra(
+            _weighted_physical_graph(circuit),
+            source_node,
+            target_node,
+            weight="cost",
+        )
+    except NetworkXException:
+        path = [source_node, target_node]
+    return [_physical_node_data(node) for node in path]
+
+
+def _weighted_physical_graph(circuit: MultiZoneCircuit) -> DiGraph:
+    graph = DiGraph()
+    for junction in circuit.architecture.junctions:
+        graph.add_node(
+            ("junction", junction.junction_id, None),
+            junction_cost=junction.cost,
+        )
+    for connection in circuit.architecture.connections:
+        node0 = _physical_endpoint_node(connection.endpoint0)
+        node1 = _physical_endpoint_node(connection.endpoint1)
+        for node in (node0, node1):
+            if node[0] == "port":
+                graph.add_node(node, junction_cost=0)
+        _add_weighted_physical_edge(graph, node0, node1, connection.shuttle_cost)
+        _add_weighted_physical_edge(graph, node1, node0, connection.shuttle_cost)
+    return graph
+
+
+def _physical_endpoint_node(
+    endpoint: PortSpec | JunctionRef,
+) -> tuple[str, int, int | None]:
+    if isinstance(endpoint, PortSpec):
+        return ("port", endpoint.zone_id, endpoint.port_id.value)
+    return ("junction", endpoint.junction_id, None)
+
+
+def _add_weighted_physical_edge(
+    graph: DiGraph,
+    source: tuple[str, int, int | None],
+    target: tuple[str, int, int | None],
+    shuttle_cost: int,
+) -> None:
+    cost = shuttle_cost + int(graph.nodes[target]["junction_cost"])
+    current_edge = graph.get_edge_data(source, target)
+    if current_edge is None or cost < current_edge["cost"]:
+        graph.add_edge(source, target, cost=cost)
+
+
 def generate_multi_zone_circuit_movie_html(
     circuit: MultiZoneCircuit,
     *,
@@ -428,6 +509,7 @@ def generate_multi_zone_circuit_movie_html(
         "title": movie.title,
         "n_qubits": movie.n_qubits,
         "zones": movie.zones,
+        "junctions": movie.junctions,
         "edges": movie.edges,
         "frames": [asdict(frame) for frame in movie.frames],
         "svg_width": _SVG_WIDTH,
@@ -575,6 +657,13 @@ def generate_multi_zone_circuit_movie_html(
       stroke-width: 6;
       stroke-linecap: round;
     }}
+    .junction-node {{
+      fill: #111111;
+      cursor: grab;
+    }}
+    .junction-node.dragging {{
+      cursor: grabbing;
+    }}
     .zone-box {{
       stroke-width: 2.2;
       rx: 20;
@@ -703,26 +792,40 @@ def generate_multi_zone_circuit_movie_html(
       return zone?.gate_qubit_color ?? "#eace09";
     }}
 
-    function pointAlongShuttle(start, sourceAnchor, targetAnchor, end, progress) {{
-      if (progress <= 0.28) {{
-        const local = progress / 0.28;
-        return {{
-          x: start.x + ((sourceAnchor.x - start.x) * local),
-          y: start.y + ((sourceAnchor.y - start.y) * local),
-        }};
+    function pointAlongPolyline(points, progress) {{
+      if (points.length === 0) {{
+        return {{ x: 0, y: 0 }};
       }}
-      if (progress <= 0.72) {{
-        const local = (progress - 0.28) / 0.44;
-        return {{
-          x: sourceAnchor.x + ((targetAnchor.x - sourceAnchor.x) * local),
-          y: sourceAnchor.y + ((targetAnchor.y - sourceAnchor.y) * local),
-        }};
+      if (points.length === 1) {{
+        return points[0];
       }}
-      const local = (progress - 0.72) / 0.28;
-      return {{
-        x: targetAnchor.x + ((end.x - targetAnchor.x) * local),
-        y: targetAnchor.y + ((end.y - targetAnchor.y) * local),
-      }};
+      const lengths = [];
+      let totalLength = 0;
+      for (let index = 1; index < points.length; index += 1) {{
+        const previous = points[index - 1];
+        const current = points[index];
+        const length = Math.hypot(current.x - previous.x, current.y - previous.y);
+        lengths.push(length);
+        totalLength += length;
+      }}
+      if (totalLength === 0) {{
+        return points[points.length - 1];
+      }}
+      let remaining = Math.min(Math.max(progress, 0), 1) * totalLength;
+      for (let index = 1; index < points.length; index += 1) {{
+        const segmentLength = lengths[index - 1];
+        if (remaining <= segmentLength || index === points.length - 1) {{
+          const previous = points[index - 1];
+          const current = points[index];
+          const local = segmentLength === 0 ? 1 : remaining / segmentLength;
+          return {{
+            x: previous.x + ((current.x - previous.x) * local),
+            y: previous.y + ((current.y - previous.y) * local),
+          }};
+        }}
+        remaining -= segmentLength;
+      }}
+      return points[points.length - 1];
     }}
 
     function edgeAnchor(zone, port) {{
@@ -756,7 +859,9 @@ def generate_multi_zone_circuit_movie_html(
     svg.appendChild(qubitLayer);
 
     const zoneMap = new Map(movieData.zones.map((zone) => [zone.id, zone]));
+    const junctionMap = new Map(movieData.junctions.map((junction) => [junction.id, junction]));
     const zoneVisuals = new Map();
+    const junctionVisuals = new Map();
     const edgeVisuals = [];
 
     function translateZone(zone, dx, dy) {{
@@ -768,6 +873,11 @@ def generate_multi_zone_circuit_movie_html(
         slot.x += dx;
         slot.y += dy;
       }});
+    }}
+
+    function translateJunction(junction, dx, dy) {{
+      junction.x += dx;
+      junction.y += dy;
     }}
 
     function layoutZoneSlots(zone) {{
@@ -816,15 +926,21 @@ def generate_multi_zone_circuit_movie_html(
 
     function updateEdgePositions() {{
       edgeVisuals.forEach((edgeVisual) => {{
-        const source = zoneMap.get(edgeVisual.edge.source);
-        const target = zoneMap.get(edgeVisual.edge.target);
-        const sourceAnchor = edgeAnchor(source, edgeVisual.edge.source_port);
-        const targetAnchor = edgeAnchor(target, edgeVisual.edge.target_port);
+        const sourceAnchor = physicalNodePosition(edgeVisual.edge.source);
+        const targetAnchor = physicalNodePosition(edgeVisual.edge.target);
         edgeVisual.line.setAttribute("x1", String(sourceAnchor.x));
         edgeVisual.line.setAttribute("y1", String(sourceAnchor.y));
         edgeVisual.line.setAttribute("x2", String(targetAnchor.x));
         edgeVisual.line.setAttribute("y2", String(targetAnchor.y));
       }});
+    }}
+
+    function physicalNodePosition(node) {{
+      if (node.kind === "port") {{
+        return edgeAnchor(zoneMap.get(node.zone), node.port);
+      }}
+      const junction = junctionMap.get(node.junction);
+      return {{ x: junction.x, y: junction.y }};
     }}
 
     function updateZoneGraphics(zoneId) {{
@@ -859,6 +975,15 @@ def generate_multi_zone_circuit_movie_html(
       renderFrame(frameIndex, false);
     }}
 
+    function updateJunctionGraphics(junctionId) {{
+      const junction = junctionMap.get(junctionId);
+      const visuals = junctionVisuals.get(junctionId);
+      visuals.circle.setAttribute("cx", String(junction.x));
+      visuals.circle.setAttribute("cy", String(junction.y));
+      updateEdgePositions();
+      renderFrame(frameIndex, false);
+    }}
+
     function svgPointFromClient(clientX, clientY) {{
       const point = svg.createSVGPoint();
       point.x = clientX;
@@ -870,6 +995,7 @@ def generate_multi_zone_circuit_movie_html(
       event.preventDefault();
       const point = svgPointFromClient(event.clientX, event.clientY);
       dragState = {{
+        kind: "zone",
         zoneId,
         lastX: point.x,
         lastY: point.y,
@@ -878,7 +1004,19 @@ def generate_multi_zone_circuit_movie_html(
       visuals.box.classList.add("dragging");
     }}
 
-    function handleZoneDrag(event) {{
+    function startJunctionDrag(junctionId, event) {{
+      event.preventDefault();
+      const point = svgPointFromClient(event.clientX, event.clientY);
+      dragState = {{
+        kind: "junction",
+        junctionId,
+        lastX: point.x,
+        lastY: point.y,
+      }};
+      junctionVisuals.get(junctionId).circle.classList.add("dragging");
+    }}
+
+    function handleDrag(event) {{
       if (dragState === null) {{
         return;
       }}
@@ -887,16 +1025,26 @@ def generate_multi_zone_circuit_movie_html(
       const dy = point.y - dragState.lastY;
       dragState.lastX = point.x;
       dragState.lastY = point.y;
-      const zone = zoneMap.get(dragState.zoneId);
-      translateZone(zone, dx, dy);
-      updateZoneGraphics(dragState.zoneId);
+      if (dragState.kind === "zone") {{
+        const zone = zoneMap.get(dragState.zoneId);
+        translateZone(zone, dx, dy);
+        updateZoneGraphics(dragState.zoneId);
+        return;
+      }}
+      const junction = junctionMap.get(dragState.junctionId);
+      translateJunction(junction, dx, dy);
+      updateJunctionGraphics(dragState.junctionId);
     }}
 
-    function stopZoneDrag() {{
+    function stopDrag() {{
       if (dragState === null) {{
         return;
       }}
-      zoneVisuals.get(dragState.zoneId).box.classList.remove("dragging");
+      if (dragState.kind === "zone") {{
+        zoneVisuals.get(dragState.zoneId).box.classList.remove("dragging");
+      }} else {{
+        junctionVisuals.get(dragState.junctionId).circle.classList.remove("dragging");
+      }}
       dragState = null;
     }}
 
@@ -908,10 +1056,8 @@ def generate_multi_zone_circuit_movie_html(
     }}
 
     movieData.edges.forEach((edge) => {{
-      const source = zoneMap.get(edge.source);
-      const target = zoneMap.get(edge.target);
-      const sourceAnchor = edgeAnchor(source, edge.source_port);
-      const targetAnchor = edgeAnchor(target, edge.target_port);
+      const sourceAnchor = physicalNodePosition(edge.source);
+      const targetAnchor = physicalNodePosition(edge.target);
       const line = createSvg("line", {{
         x1: sourceAnchor.x,
         y1: sourceAnchor.y,
@@ -921,6 +1067,18 @@ def generate_multi_zone_circuit_movie_html(
       }});
       edgeVisuals.push({{ edge, line }});
       staticLayer.appendChild(line);
+    }});
+
+    movieData.junctions.forEach((junction) => {{
+      const circle = createSvg("circle", {{
+        cx: junction.x,
+        cy: junction.y,
+        r: 7,
+        class: "junction-node",
+      }});
+      staticLayer.appendChild(circle);
+      junctionVisuals.set(junction.id, {{ circle }});
+      circle.addEventListener("pointerdown", (event) => startJunctionDrag(junction.id, event));
     }});
 
     movieData.zones.forEach((zone) => {{
@@ -1008,9 +1166,9 @@ def generate_multi_zone_circuit_movie_html(
       }});
     }});
 
-    svg.addEventListener("pointermove", handleZoneDrag);
-    svg.addEventListener("pointerup", stopZoneDrag);
-    svg.addEventListener("pointerleave", stopZoneDrag);
+    svg.addEventListener("pointermove", handleDrag);
+    svg.addEventListener("pointerup", stopDrag);
+    svg.addEventListener("pointerleave", stopDrag);
 
     const qubitElements = new Map();
     for (let qubit = 0; qubit < movieData.n_qubits; qubit += 1) {{
@@ -1074,10 +1232,17 @@ def generate_multi_zone_circuit_movie_html(
         return;
       }}
       const previousPositions = qubitTransforms(previousFrame);
-      const sourceZone = zoneMap.get(frame.shuttle.source_zone);
-      const targetZone = zoneMap.get(frame.shuttle.target_zone);
-      const sourceAnchor = edgeAnchor(sourceZone, frame.shuttle.source_port);
-      const targetAnchor = edgeAnchor(targetZone, frame.shuttle.target_port);
+      const route = frame.shuttle.path.map((node) => physicalNodePosition(node));
+      const sourceAnchor = route[0] ?? physicalNodePosition({{
+        kind: "port",
+        zone: frame.shuttle.source_zone,
+        port: frame.shuttle.source_port,
+      }});
+      const targetAnchor = route[route.length - 1] ?? physicalNodePosition({{
+        kind: "port",
+        zone: frame.shuttle.target_zone,
+        port: frame.shuttle.target_port,
+      }});
       const duration = Math.max(120, currentFrameDuration() * 0.99);
       const dx = targetAnchor.x - sourceAnchor.x;
       const dy = targetAnchor.y - sourceAnchor.y;
@@ -1099,16 +1264,14 @@ def generate_multi_zone_circuit_movie_html(
         const chainOffsetY = centeredIndex * chainSpacing * directionY;
         shuttleQubitPositions.set(qubit, {{
           qubitElement,
-          start,
-          end,
-          sourceAnchor: {{
-            x: sourceAnchor.x - chainOffsetX,
-            y: sourceAnchor.y - chainOffsetY,
-          }},
-          targetAnchor: {{
-            x: targetAnchor.x + chainOffsetX,
-            y: targetAnchor.y + chainOffsetY,
-          }},
+          points: [
+            start,
+            ...route.map((point) => ({{
+              x: point.x + chainOffsetX,
+              y: point.y + chainOffsetY,
+            }})),
+            end,
+          ],
         }});
       }});
 
@@ -1119,13 +1282,7 @@ def generate_multi_zone_circuit_movie_html(
         }}
         const progress = Math.min((now - startedAt) / duration, 1);
         shuttleQubitPositions.forEach((path) => {{
-          const point = pointAlongShuttle(
-            path.start,
-            path.sourceAnchor,
-            path.targetAnchor,
-            path.end,
-            progress
-          );
+          const point = pointAlongPolyline(path.points, progress);
           path.qubitElement.group.setAttribute("transform", translate(point.x, point.y));
         }});
         if (progress < 1) {{
@@ -1434,6 +1591,77 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
             }
         )
     return zones
+
+
+def _junction_layout(
+    circuit: MultiZoneCircuit, zones: list[dict[str, Any]]
+) -> list[dict[str, Any]]:
+    zone_map = {zone["id"]: zone for zone in zones}
+    junction_positions: dict[int, tuple[float, float]] = {}
+    fallback = (_SVG_WIDTH / 2, _SVG_HEIGHT / 2)
+
+    for _ in range(max(len(circuit.architecture.junctions), 1) + 2):
+        updated_positions = junction_positions.copy()
+        for junction in circuit.architecture.junctions:
+            neighbor_positions: list[tuple[float, float]] = []
+            for connection in circuit.architecture.connections:
+                if _connection_has_junction_endpoint(connection, junction.junction_id):
+                    for endpoint in (connection.endpoint0, connection.endpoint1):
+                        if isinstance(endpoint, PortSpec):
+                            neighbor_positions.append(
+                                _zone_edge_anchor(
+                                    zone_map[endpoint.zone_id], endpoint.port_id.value
+                                )
+                            )
+                        elif endpoint.junction_id != junction.junction_id:
+                            neighbor_positions.append(
+                                junction_positions.get(endpoint.junction_id, fallback)
+                            )
+            if neighbor_positions:
+                updated_positions[junction.junction_id] = (
+                    sum(position[0] for position in neighbor_positions)
+                    / len(neighbor_positions),
+                    sum(position[1] for position in neighbor_positions)
+                    / len(neighbor_positions),
+                )
+            else:
+                updated_positions[junction.junction_id] = fallback
+        junction_positions = updated_positions
+
+    return [
+        {
+            "id": junction.junction_id,
+            "x": round(junction_positions[junction.junction_id][0], 2),
+            "y": round(junction_positions[junction.junction_id][1], 2),
+        }
+        for junction in circuit.architecture.junctions
+    ]
+
+
+def _connection_has_junction_endpoint(connection: Any, junction_id: int) -> bool:
+    return any(
+        isinstance(endpoint, JunctionRef) and endpoint.junction_id == junction_id
+        for endpoint in (connection.endpoint0, connection.endpoint1)
+    )
+
+
+def _zone_edge_anchor(zone: dict[str, Any], port: int) -> tuple[float, float]:
+    if zone["orientation"] == _ORIENTATION_VERTICAL_P0_BOTTOM:
+        return (
+            zone["center_x"],
+            zone["y"] + zone["height"] if port == 0 else zone["y"],
+        )
+    if zone["orientation"] == _ORIENTATION_HORIZONTAL_REVERSED:
+        return (
+            zone["x"] + zone["width"] if port == 0 else zone["x"],
+            zone["center_y"],
+        )
+    if zone["orientation"] == _ORIENTATION_VERTICAL_P0_TOP:
+        return (
+            zone["center_x"],
+            zone["y"] if port == 0 else zone["y"] + zone["height"],
+        )
+    return (zone["x"] if port == 0 else zone["x"] + zone["width"], zone["center_y"])
 
 
 def _best_non_linear_zone_orientations(

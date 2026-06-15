@@ -215,6 +215,10 @@ def test_build_multi_zone_circuit_movie_frames_tracks_shuttles_swaps_and_gates()
         "target_zone": 1,
         "source_port": PortId.p1.value,
         "target_port": PortId.p0.value,
+        "path": [
+            {"kind": "port", "zone": 0, "port": PortId.p1.value},
+            {"kind": "port", "zone": 1, "port": PortId.p0.value},
+        ],
         "qubits": [1],
     }
     pswap_frame = next(frame for frame in frames if frame.kind == "pswap")
@@ -390,22 +394,19 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert "function edgeAnchor(zone, port)" in html
     assert "function animateShuttle(frame, previousFrame, positions)" in html
     assert "function animatePswap(frame, previousFrame, positions)" in html
+    assert "function physicalNodePosition(node)" in html
+    assert "function pointAlongPolyline(points, progress)" in html
     assert (
-        "const sourceAnchor = edgeAnchor(sourceZone, frame.shuttle.source_port);"
-        in html
-    )
-    assert (
-        "const targetAnchor = edgeAnchor(targetZone, frame.shuttle.target_port);"
+        "const route = frame.shuttle.path.map((node) => physicalNodePosition(node));"
         in html
     )
     assert "const duration = Math.max(120, currentFrameDuration() * 0.99);" in html
     assert "const directionX = dx / length;" in html
     assert "const directionY = dy / length;" in html
     assert "const chainSpacing = 12;" in html
-    assert "sourceAnchor.x - chainOffsetX" in html
-    assert "sourceAnchor.y - chainOffsetY" in html
-    assert "targetAnchor.x + chainOffsetX" in html
-    assert "targetAnchor.y + chainOffsetY" in html
+    assert "pointAlongPolyline(path.points, progress)" in html
+    assert "x: point.x + chainOffsetX" in html
+    assert "y: point.y + chainOffsetY" in html
     assert "const angle = progress * Math.PI;" in html
     assert (
         "const x = path.centerX + (path.relX * cosAngle) - (path.relY * sinAngle);"
@@ -437,8 +438,12 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
         in html
     )
     assert 'rotateHandle.addEventListener("pointerdown", (event) => {' in html
-    assert 'svg.addEventListener("pointermove", handleZoneDrag);' in html
-    assert 'svg.addEventListener("pointerup", stopZoneDrag);' in html
+    assert "function startJunctionDrag(junctionId, event)" in html
+    assert "function updateJunctionGraphics(junctionId)" in html
+    assert 'class: "junction-node"' in html
+    assert "junction-label" not in html
+    assert 'svg.addEventListener("pointermove", handleDrag);' in html
+    assert 'svg.addEventListener("pointerup", stopDrag);' in html
     assert 'fill: zone.is_gate_zone ? zone.gate_color : "var(--zone-fill)"' in html
     assert (
         'stroke: zone.is_gate_zone ? zone.gate_stroke_color : "var(--zone-stroke)"'
@@ -483,10 +488,10 @@ def test_build_multi_zone_circuit_movie_edges_include_port_anchors() -> None:
 
     assert {
         (
-            edge["source"],
-            edge["target"],
-            edge["source_port"],
-            edge["target_port"],
+            edge["source"]["zone"],
+            edge["target"]["zone"],
+            edge["source"]["port"],
+            edge["target"]["port"],
         )
         for edge in movie.edges
     } == {
@@ -655,7 +660,8 @@ def test_visualizer_handles_routed_non_linear_architectures(
 
     assert circuit.macro_arch.is_linear_architecture is False
     assert len(movie.zones) == architecture.n_zones
-    assert len(movie.edges) == len(architecture.port_to_port_connections)
+    assert len(movie.junctions) == len(architecture.junctions)
+    assert len(movie.edges) == len(architecture.connections)
     assert len(movie.frames) > 1
     assert any(frame.kind == "gate" for frame in movie.frames)
     assert any(frame.kind in {"shuttle", "pswap"} for frame in movie.frames)

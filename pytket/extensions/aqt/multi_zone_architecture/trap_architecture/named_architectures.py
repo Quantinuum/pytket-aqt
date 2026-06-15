@@ -264,9 +264,14 @@ for vertical zones port 0 is up, port 1 is down
 n_zones = 15
 zone_max = 4
 gate_zone_type_junction_groups = [
+    [(0, PortId.p1), (1, PortId.p0)],
     [(1, PortId.p1), (2, PortId.p0), (6, PortId.p0)],
-    [(3, PortId.p1), (4, PortId.p0), (7, PortId.p0)],
+    [(2, PortId.p1), (3, PortId.p0), (7, PortId.p0)],
+    [(3, PortId.p1), (4, PortId.p0)],
+    [(4, PortId.p1), (5, PortId.p0)],
+    [(6, PortId.p1), (8, PortId.p0)],
     [(8, PortId.p1), (9, PortId.p0), (7, PortId.p1), (11, PortId.p0)],
+    [(9, PortId.p1), (10, PortId.p0)],
     [(12, PortId.p1), (13, PortId.p0), (11, PortId.p1), (14, PortId.p0)],
 ]
 gate_zone_type_junctions = [
@@ -291,15 +296,6 @@ gate_zone_type_examples = MultiZoneArchitectureSpec(
     ],
     junctions=gate_zone_type_junctions,
     connections=[
-        *get_direct_physical_connections(
-            [
-                (0, PortId.p1, 1, PortId.p0),
-                (2, PortId.p1, 3, PortId.p0),
-                (4, PortId.p1, 5, PortId.p0),
-                (8, PortId.p0, 6, PortId.p1),
-                (9, PortId.p1, 10, PortId.p0),
-            ]
-        ),
         *gate_zone_type_junction_connections,
     ],
 )
