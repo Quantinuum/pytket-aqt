@@ -67,9 +67,11 @@ from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.architectur
     Zone,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.named_architectures import (
+    J5Z12,
     four_zones_in_a_line,
     gate_zone_type_examples,
     grid12,
+    grid12_mod,
     linear_8_zones,
 )
 from tests.multi_zone.dangling_single_qubit_circuit_test import build_test_circuit
@@ -139,7 +141,7 @@ def _routed_non_linear_visualizer_circuit(
         pytket_optimisation_level=1,
         initial_placement=InitialPlacementSettings(
             algorithm=InitialPlacementAlg.qubit_order,
-            zone_free_space=2,
+            zone_free_space=0,
             max_depth=200,
         ),
         routing=RoutingConfig(
@@ -706,11 +708,19 @@ def test_slot_centers_use_single_horizontal_row() -> None:
 @pytest.mark.parametrize(
     ("architecture", "title"),
     [
-        pytest.param(grid12, "Grid12 QFT Movie", id="grid12"),
+        pytest.param(grid12, "Grid12 All gate zones QFT Movie", id="grid12"),
+        pytest.param(
+            grid12_mod, "Grid12 2,4,7,9 gate zones QFT Movie", id="grid12_mod"
+        ),
         pytest.param(
             gate_zone_type_examples,
             "Gate Zone Types QFT Movie",
             id="gate-zone-type-examples",
+        ),
+        pytest.param(
+            J5Z12,
+            "J5Z12 Arch QFT Movie",
+            id="j5z12",
         ),
     ],
 )

@@ -361,3 +361,82 @@ gate_zone_type_examples = MultiZoneArchitectureSpec(
     ],
     visualization=gate_zone_type_visualization,
 )
+
+
+"""
+J5Z12:
+
+A linear arrangement of degree 4 junctions. The inner junctions are each connected to two memory zones.
+The edge junctions are connected to two memory zones and one gate zone each. See illustration.
+
+* = gate zone
+    1   3   5   7   9
+0* -| - | - | - | - | - 11*
+    2   4   6   8   10
+
+for horizontal zones port 0 is left, port 1 is right
+for vertical zones port 0 is up, port 1 is down
+"""
+n_zones = 12
+gate_zone_max = 8
+mem_zone_max = 2
+junction_groups = [
+    [(0, PortId.p1), (1, PortId.p1), (2, PortId.p0)],
+    [(3, PortId.p1), (4, PortId.p0)],
+    [(5, PortId.p1), (6, PortId.p0)],
+    [(7, PortId.p1), (8, PortId.p0)],
+    [(11, PortId.p0), (9, PortId.p1), (10, PortId.p0)],
+]
+junctions = [
+    Junction(junction_id=junction_id) for junction_id in range(len(junction_groups))
+]
+junction_junction_connections = [
+    PhysicalConnection(endpoint0=_junction(i), endpoint1=_junction(i + 1))
+    for i in range(len(junction_groups) - 1)
+]
+junction_zone_connections = [
+    connection
+    for junction_id, zone_ports in enumerate(junction_groups)
+    for connection in get_junction_connections(junction_id, zone_ports)
+]
+J5Z12_visualization = VisualizationSpec(
+    zone_positions={
+        0: LayoutPosition(x=0, y=1),
+        1: LayoutPosition(x=1, y=0),
+        2: LayoutPosition(x=1, y=2),
+        3: LayoutPosition(x=2, y=0),
+        4: LayoutPosition(x=2, y=2),
+        5: LayoutPosition(x=3, y=0),
+        6: LayoutPosition(x=3, y=2),
+        7: LayoutPosition(x=4, y=0),
+        8: LayoutPosition(x=4, y=2),
+        9: LayoutPosition(x=5, y=0),
+        10: LayoutPosition(x=5, y=2),
+        11: LayoutPosition(x=6, y=1),
+    },
+    junction_positions={
+        0: LayoutPosition(x=1, y=1),
+        1: LayoutPosition(x=2, y=1),
+        2: LayoutPosition(x=3, y=1),
+        3: LayoutPosition(x=4, y=1),
+        4: LayoutPosition(x=5, y=1),
+    },
+)
+J5Z12 = MultiZoneArchitectureSpec(
+    n_qubits_max=32,
+    n_zones=n_zones,
+    zones=[
+        (
+            Zone(max_ions_gate_op=gate_zone_max)
+            if i in [0, 11]
+            else Zone(max_ions_gate_op=mem_zone_max, memory_only=True)
+        )
+        for i in range(n_zones)
+    ],
+    junctions=junctions,
+    connections=[
+        *junction_junction_connections,
+        *junction_zone_connections,
+    ],
+    visualization=J5Z12_visualization,
+)
