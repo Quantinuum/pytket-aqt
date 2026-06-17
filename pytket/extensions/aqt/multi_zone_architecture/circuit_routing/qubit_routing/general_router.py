@@ -58,6 +58,7 @@ class GeneralRouter(Router):
         target_placement: ZonePlacement,
     ) -> RoutingResult:
         starting_config = dyn_arch.trap_configuration
+        validate_complete_target_placement(starting_config.n_qubits, target_placement)
         qubits_to_move = get_needed_movements(
             starting_config.n_qubits, starting_config.zone_placement, target_placement
         )
@@ -318,6 +319,29 @@ def get_needed_movements(
         for qubit in range(n_qubits)
         if qubit_to_zone_old[qubit] != qubit_to_zone_new[qubit]
     ]
+
+
+def validate_complete_target_placement(
+    n_qubits: int, target_placement: ZonePlacement
+) -> None:
+    qubit_counts = [0 for _ in range(n_qubits)]
+    out_of_range_qubits: list[int] = []
+    for zone_qubits in target_placement:
+        for qubit in zone_qubits:
+            if qubit < 0 or qubit >= n_qubits:
+                out_of_range_qubits.append(qubit)
+                continue
+            qubit_counts[qubit] += 1
+
+    missing_qubits = [qubit for qubit, count in enumerate(qubit_counts) if count == 0]
+    duplicated_qubits = [qubit for qubit, count in enumerate(qubit_counts) if count > 1]
+    if missing_qubits or duplicated_qubits or out_of_range_qubits:
+        raise ValueError(
+            "GeneralRouter requires a complete target placement with each qubit "
+            f"placed exactly once. Missing qubits: {missing_qubits}; "
+            f"duplicated qubits: {duplicated_qubits}; "
+            f"out-of-range qubits: {sorted(out_of_range_qubits)}."
+        )
 
 
 def get_move_groups(
