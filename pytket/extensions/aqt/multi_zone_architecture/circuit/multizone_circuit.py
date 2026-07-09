@@ -291,6 +291,10 @@ class MultiZoneCircuit:
         return self.pytket_circuit.__iter__()
 
     @property
+    def n_qubits(self) -> int:
+        return self.pytket_circuit.n_qubits
+
+    @property
     def is_compiled(self) -> bool:
         return self._is_compiled
 

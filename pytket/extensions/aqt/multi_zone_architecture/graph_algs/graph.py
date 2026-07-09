@@ -70,3 +70,6 @@ class HypergraphData:
             raise ValueError("len(vertex_weights) must equal n_vertices")
         if len(self.nets) != len(self.net_weights):
             raise ValueError("len(net_weights) must equal len(nets)")
+
+    def print_hypergraph(self):
+        print(f"Hypergraph: {self.n_vertices} vertices, {len(self.nets)} nets")

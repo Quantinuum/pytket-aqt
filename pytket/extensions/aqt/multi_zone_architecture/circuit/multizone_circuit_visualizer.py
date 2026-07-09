@@ -38,11 +38,10 @@ _LAYOUT_MARGIN_X = 64
 _LAYOUT_MARGIN_Y = 88
 _ZONE_GAP_X = 24
 _ZONE_GAP_Y = 116
-_ZONE_MIN_WIDTH = 132
-_ZONE_MAX_WIDTH = 188
-_ZONE_HEIGHT = 52
-_SLOT_GAP_X = 24
-_SLOT_MARGIN_X = 20
+_ZONE_MIN_WIDTH = 72
+_ZONE_HEIGHT = 34
+_SLOT_GAP_X = 30
+_SLOT_MARGIN_X = 16
 _NON_LINEAR_ZONE_BORDER_GAP = _ZONE_HEIGHT / 2
 _ORIENTATION_HORIZONTAL = 0
 _ORIENTATION_VERTICAL_P0_BOTTOM = 1
@@ -491,14 +490,17 @@ def _add_weighted_physical_edge(
         graph.add_edge(source, target, cost=cost)
 
 
-def generate_multi_zone_circuit_movie_html(
+def generate_multi_zone_circuit_movie_html(  # noqa PLR0913
     circuit: MultiZoneCircuit,
     *,
     title: str | None = None,
     frame_duration_ms: float = 300.0,
+    element_scale: float = 1.0,
     highlight_upcoming_qubits: bool = True,
     condense_quantum_ops: bool = True,
 ) -> str:
+    if element_scale <= 0:
+        raise ValueError("element_scale must be positive.")
     movie = build_multi_zone_circuit_movie(
         circuit,
         title=title,
@@ -515,9 +517,11 @@ def generate_multi_zone_circuit_movie_html(
         "svg_width": _SVG_WIDTH,
         "svg_height": _SVG_HEIGHT,
         "frame_duration_ms": frame_duration_ms,
+        "element_scale": element_scale,
     }
     movie_json = json.dumps(movie_dict)
     default_frame_duration_ms = json.dumps(frame_duration_ms)
+    default_element_scale = json.dumps(element_scale)
     page_title = escape(movie.title)
     return f"""<!DOCTYPE html>
 <html lang="en">
@@ -654,7 +658,6 @@ def generate_multi_zone_circuit_movie_html(
     }}
     .edge {{
       stroke: var(--edge);
-      stroke-width: 6;
       stroke-linecap: round;
     }}
     .junction-node {{
@@ -665,16 +668,12 @@ def generate_multi_zone_circuit_movie_html(
       cursor: grabbing;
     }}
     .zone-box {{
-      stroke-width: 2.2;
-      rx: 20;
-      ry: 20;
       cursor: grab;
     }}
     .zone-box.dragging {{
       cursor: grabbing;
     }}
     .zone-label {{
-      font-size: 16px;
       font-weight: 700;
       text-anchor: middle;
       fill: var(--fg);
@@ -682,11 +681,9 @@ def generate_multi_zone_circuit_movie_html(
     }}
     .zone-rotate-handle {{
       fill: rgba(255, 255, 255, 0.92);
-      stroke-width: 1.6;
       cursor: pointer;
     }}
     .zone-rotate-icon {{
-      font-size: 11px;
       font-weight: 700;
       text-anchor: middle;
       dominant-baseline: middle;
@@ -699,7 +696,6 @@ def generate_multi_zone_circuit_movie_html(
     }}
     .transport-slot-mark {{
       stroke: rgba(95, 108, 123, 0.45);
-      stroke-width: 1.8;
       stroke-linecap: round;
     }}
     .qubit {{
@@ -709,7 +705,6 @@ def generate_multi_zone_circuit_movie_html(
       transition: fill 0.25s ease, stroke 0.25s ease;
     }}
     .qubit text {{
-      font-size: 11px;
       font-weight: 700;
       text-anchor: middle;
       dominant-baseline: middle;
@@ -727,6 +722,9 @@ def generate_multi_zone_circuit_movie_html(
       <button id="next" type="button">Next</button>
       <label for="frame-duration" class="frame-label">ms / frame</label>
       <input id="frame-duration" type="number" min="1" step="0.1" value={default_frame_duration_ms}>
+      <label for="element-scale" class="frame-label">element scale</label>
+      <input id="element-scale" type="range" min="0.35" max="1.5" step="0.05" value={default_element_scale}>
+      <div id="element-scale-label" class="frame-label"></div>
       <input id="timeline" type="range" min="0" max="0" value="0">
       <div id="frame-label" class="frame-label"></div>
     </div>
@@ -748,12 +746,30 @@ def generate_multi_zone_circuit_movie_html(
     const prevButton = document.getElementById("prev");
     const nextButton = document.getElementById("next");
     const frameDurationInput = document.getElementById("frame-duration");
+    const elementScaleInput = document.getElementById("element-scale");
+    const elementScaleLabel = document.getElementById("element-scale-label");
     const frameLabel = document.getElementById("frame-label");
     const ns = "http://www.w3.org/2000/svg";
-    const slotGap = 24;
-    const slotMargin = 20;
-    const qubitRadius = 11;
-    const activeQubitRadius = 13;
+    let elementScale = Number(elementScaleInput.value);
+    let slotGap = {_SLOT_GAP_X} * elementScale;
+    let slotMargin = {_SLOT_MARGIN_X} * elementScale;
+    let qubitRadius = 11 * elementScale;
+    let activeQubitRadius = 13 * elementScale;
+    let edgeStrokeWidth = 6 * elementScale;
+    let junctionRadius = 7 * elementScale;
+    let slotRadius = 8 * elementScale;
+    let slotMarkSize = 4 * elementScale;
+    let transportSlotMarkStrokeWidth = 1.8 * elementScale;
+    let zoneStrokeWidth = 2.2 * elementScale;
+    let zoneCornerRadius = 20 * elementScale;
+    let zoneLabelOffset = 10 * elementScale;
+    let zoneLabelFontSize = 16 * elementScale;
+    let rotateHandleRadius = 8 * elementScale;
+    let rotateHandleInset = 12 * elementScale;
+    let rotateHandleStrokeWidth = 1.6 * elementScale;
+    let rotateIconFontSize = 11 * elementScale;
+    let qubitStrokeWidth = 2.2 * elementScale;
+    let qubitLabelFontSize = 11 * elementScale;
     const qubitStroke = "rgba(15, 23, 42, 0.32)";
     const activeQubitStroke = "#7f1d1d";
     const currentOperationRow = 10;
@@ -765,7 +781,35 @@ def generate_multi_zone_circuit_movie_html(
     let shuttleAnimationRequest = null;
     let shuttleAnimationToken = 0;
 
+    function refreshScaledConstants() {{
+      slotGap = {_SLOT_GAP_X} * elementScale;
+      slotMargin = {_SLOT_MARGIN_X} * elementScale;
+      qubitRadius = 11 * elementScale;
+      activeQubitRadius = 13 * elementScale;
+      edgeStrokeWidth = 6 * elementScale;
+      junctionRadius = 7 * elementScale;
+      slotRadius = 8 * elementScale;
+      slotMarkSize = 4 * elementScale;
+      transportSlotMarkStrokeWidth = 1.8 * elementScale;
+      zoneStrokeWidth = 2.2 * elementScale;
+      zoneCornerRadius = 20 * elementScale;
+      zoneLabelOffset = 10 * elementScale;
+      zoneLabelFontSize = 16 * elementScale;
+      rotateHandleRadius = 8 * elementScale;
+      rotateHandleInset = 12 * elementScale;
+      rotateHandleStrokeWidth = 1.6 * elementScale;
+      rotateIconFontSize = 11 * elementScale;
+      qubitStrokeWidth = 2.2 * elementScale;
+      qubitLabelFontSize = 11 * elementScale;
+    }}
+
+    function updateElementScaleLabel() {{
+      elementScaleLabel.textContent = `${{Math.round(elementScale * 100)}}%`;
+    }}
+
     timeline.max = String(movieData.frames.length - 1);
+    refreshScaledConstants();
+    updateElementScaleLabel();
     for (let rowIndex = 0; rowIndex < visibleOperationRows; rowIndex += 1) {{
       operationsList.appendChild(document.createElement("div"));
     }}
@@ -899,7 +943,7 @@ def generate_multi_zone_circuit_movie_html(
         }});
         return;
       }}
-      const slotY = zone.center_y + 2;
+      const slotY = zone.center_y;
       const usableWidth = zone.width - (2 * slotMargin);
       const gap = Math.min(slotGap, usableWidth / Math.max(zone.slots.length - 1, 1));
       const totalSlotsWidth = gap * Math.max(zone.slots.length - 1, 0);
@@ -915,8 +959,8 @@ def generate_multi_zone_circuit_movie_html(
 
     function applyZoneOrientation(zone) {{
       const isVertical = zone.orientation === 1 || zone.orientation === 3;
-      const width = isVertical ? zone.base_height : zone.base_width;
-      const height = isVertical ? zone.base_width : zone.base_height;
+      const width = (isVertical ? zone.base_height : zone.base_width) * elementScale;
+      const height = (isVertical ? zone.base_width : zone.base_height) * elementScale;
       zone.width = width;
       zone.height = height;
       zone.x = zone.center_x - (width / 2);
@@ -943,45 +987,60 @@ def generate_multi_zone_circuit_movie_html(
       return {{ x: junction.x, y: junction.y }};
     }}
 
-    function updateZoneGraphics(zoneId) {{
+    function updateZoneGraphics(zoneId, rerender = true) {{
       const zone = zoneMap.get(zoneId);
       const visuals = zoneVisuals.get(zoneId);
       visuals.box.setAttribute("x", String(zone.x));
       visuals.box.setAttribute("y", String(zone.y));
       visuals.box.setAttribute("width", String(zone.width));
       visuals.box.setAttribute("height", String(zone.height));
+      visuals.box.setAttribute("rx", String(zoneCornerRadius));
+      visuals.box.setAttribute("ry", String(zoneCornerRadius));
+      visuals.box.setAttribute("stroke-width", String(zoneStrokeWidth));
       visuals.label.setAttribute("x", String(zone.center_x));
-      visuals.label.setAttribute("y", String(zone.y - 10));
-      visuals.rotateHandle.setAttribute("cx", String(zone.x + zone.width - 12));
-      visuals.rotateHandle.setAttribute("cy", String(zone.y + 12));
-      visuals.rotateIcon.setAttribute("x", String(zone.x + zone.width - 12));
-      visuals.rotateIcon.setAttribute("y", String(zone.y + 13));
+      visuals.label.setAttribute("y", String(zone.y - zoneLabelOffset));
+      visuals.label.setAttribute("font-size", String(zoneLabelFontSize));
+      visuals.rotateHandle.setAttribute("cx", String(zone.x + zone.width - rotateHandleInset));
+      visuals.rotateHandle.setAttribute("cy", String(zone.y + rotateHandleInset));
+      visuals.rotateHandle.setAttribute("r", String(rotateHandleRadius));
+      visuals.rotateHandle.setAttribute("stroke-width", String(rotateHandleStrokeWidth));
+      visuals.rotateIcon.setAttribute("x", String(zone.x + zone.width - rotateHandleInset));
+      visuals.rotateIcon.setAttribute("y", String(zone.y + rotateHandleInset + elementScale));
+      visuals.rotateIcon.setAttribute("font-size", String(rotateIconFontSize));
       zone.slots.forEach((slot, slotIndex) => {{
         const slotVisual = visuals.slots[slotIndex];
         slotVisual.circle.setAttribute("cx", String(slot.x));
         slotVisual.circle.setAttribute("cy", String(slot.y));
+        slotVisual.circle.setAttribute("r", String(slotRadius));
         if (slotVisual.crossLines !== null) {{
-          slotVisual.crossLines[0].setAttribute("x1", String(slot.x - 4));
+          slotVisual.crossLines[0].setAttribute("x1", String(slot.x - slotMarkSize));
           slotVisual.crossLines[0].setAttribute("y1", String(slot.y));
-          slotVisual.crossLines[0].setAttribute("x2", String(slot.x + 4));
+          slotVisual.crossLines[0].setAttribute("x2", String(slot.x + slotMarkSize));
           slotVisual.crossLines[0].setAttribute("y2", String(slot.y));
+          slotVisual.crossLines[0].setAttribute("stroke-width", String(transportSlotMarkStrokeWidth));
           slotVisual.crossLines[1].setAttribute("x1", String(slot.x));
-          slotVisual.crossLines[1].setAttribute("y1", String(slot.y - 4));
+          slotVisual.crossLines[1].setAttribute("y1", String(slot.y - slotMarkSize));
           slotVisual.crossLines[1].setAttribute("x2", String(slot.x));
-          slotVisual.crossLines[1].setAttribute("y2", String(slot.y + 4));
+          slotVisual.crossLines[1].setAttribute("y2", String(slot.y + slotMarkSize));
+          slotVisual.crossLines[1].setAttribute("stroke-width", String(transportSlotMarkStrokeWidth));
         }}
       }});
       updateEdgePositions();
-      renderFrame(frameIndex, false);
+      if (rerender) {{
+        renderFrame(frameIndex, false);
+      }}
     }}
 
-    function updateJunctionGraphics(junctionId) {{
+    function updateJunctionGraphics(junctionId, rerender = true) {{
       const junction = junctionMap.get(junctionId);
       const visuals = junctionVisuals.get(junctionId);
       visuals.circle.setAttribute("cx", String(junction.x));
       visuals.circle.setAttribute("cy", String(junction.y));
+      visuals.circle.setAttribute("r", String(junctionRadius));
       updateEdgePositions();
-      renderFrame(frameIndex, false);
+      if (rerender) {{
+        renderFrame(frameIndex, false);
+      }}
     }}
 
     function svgPointFromClient(clientX, clientY) {{
@@ -1055,6 +1114,8 @@ def generate_multi_zone_circuit_movie_html(
       updateZoneGraphics(zoneId);
     }}
 
+    movieData.zones.forEach((zone) => applyZoneOrientation(zone));
+
     movieData.edges.forEach((edge) => {{
       const sourceAnchor = physicalNodePosition(edge.source);
       const targetAnchor = physicalNodePosition(edge.target);
@@ -1063,6 +1124,7 @@ def generate_multi_zone_circuit_movie_html(
         y1: sourceAnchor.y,
         x2: targetAnchor.x,
         y2: targetAnchor.y,
+        "stroke-width": edgeStrokeWidth,
         class: "edge",
       }});
       edgeVisuals.push({{ edge, line }});
@@ -1073,7 +1135,7 @@ def generate_multi_zone_circuit_movie_html(
       const circle = createSvg("circle", {{
         cx: junction.x,
         cy: junction.y,
-        r: 7,
+        r: junctionRadius,
         class: "junction-node",
       }});
       staticLayer.appendChild(circle);
@@ -1088,6 +1150,9 @@ def generate_multi_zone_circuit_movie_html(
         y: zone.y,
         width: zone.width,
         height: zone.height,
+        rx: zoneCornerRadius,
+        ry: zoneCornerRadius,
+        "stroke-width": zoneStrokeWidth,
         class: `zone-box${{zone.is_gate_zone ? " gate-zone" : ""}}`,
         fill: zone.is_gate_zone ? zone.gate_color : "var(--zone-fill)",
         stroke: zone.is_gate_zone ? zone.gate_stroke_color : "var(--zone-stroke)",
@@ -1099,24 +1164,26 @@ def generate_multi_zone_circuit_movie_html(
         const circle = createSvg("circle", {{
           cx: slot.x,
           cy: slot.y,
-          r: 8,
+          r: slotRadius,
           class: "slot",
         }});
         staticLayer.appendChild(circle);
         let crossLines = null;
         if (slot.transport_only) {{
           const horizontal = createSvg("line", {{
-            x1: slot.x - 4,
+            x1: slot.x - slotMarkSize,
             y1: slot.y,
-            x2: slot.x + 4,
+            x2: slot.x + slotMarkSize,
             y2: slot.y,
+            "stroke-width": transportSlotMarkStrokeWidth,
             class: "transport-slot-mark",
           }});
           const vertical = createSvg("line", {{
             x1: slot.x,
-            y1: slot.y - 4,
+            y1: slot.y - slotMarkSize,
             x2: slot.x,
-            y2: slot.y + 4,
+            y2: slot.y + slotMarkSize,
+            "stroke-width": transportSlotMarkStrokeWidth,
             class: "transport-slot-mark",
           }});
           staticLayer.appendChild(horizontal);
@@ -1127,16 +1194,18 @@ def generate_multi_zone_circuit_movie_html(
       }});
 
       const rotateHandle = createSvg("circle", {{
-        cx: zone.x + zone.width - 12,
-        cy: zone.y + 12,
-        r: 8,
+        cx: zone.x + zone.width - rotateHandleInset,
+        cy: zone.y + rotateHandleInset,
+        r: rotateHandleRadius,
         class: `zone-rotate-handle${{zone.is_gate_zone ? " gate-zone" : ""}}`,
         stroke: zone.is_gate_zone ? zone.gate_stroke_color : "var(--zone-stroke)",
+        "stroke-width": rotateHandleStrokeWidth,
       }});
       const rotateIcon = createSvg("text", {{
-        x: zone.x + zone.width - 12,
-        y: zone.y + 13,
+        x: zone.x + zone.width - rotateHandleInset,
+        y: zone.y + rotateHandleInset + elementScale,
         class: "zone-rotate-icon",
+        "font-size": rotateIconFontSize,
       }});
       rotateIcon.textContent = "↻";
       staticLayer.appendChild(rotateHandle);
@@ -1144,8 +1213,9 @@ def generate_multi_zone_circuit_movie_html(
 
       const label = createSvg("text", {{
         x: zone.center_x,
-        y: zone.y - 10,
+        y: zone.y - zoneLabelOffset,
         class: "zone-label",
+        "font-size": zoneLabelFontSize,
       }});
       label.textContent = `Z${{zone.id}}`;
       staticLayer.appendChild(label);
@@ -1179,14 +1249,39 @@ def generate_multi_zone_circuit_movie_html(
         r: qubitRadius,
         fill: qubitColor(qubit),
         stroke: qubitStroke,
-        "stroke-width": 2.2,
+        "stroke-width": qubitStrokeWidth,
       }});
-      const text = createSvg("text", {{ x: 0, y: 0 }});
+      const text = createSvg("text", {{ x: 0, y: 0, "font-size": qubitLabelFontSize }});
       text.textContent = String(qubit);
       group.appendChild(circle);
       group.appendChild(text);
       qubitLayer.appendChild(group);
       qubitElements.set(qubit, {{ group, circle, text }});
+    }}
+
+    function applyElementScaleFromControl() {{
+      const nextScale = Number(elementScaleInput.value);
+      if (!Number.isFinite(nextScale) || nextScale <= 0) {{
+        return;
+      }}
+      elementScale = nextScale;
+      refreshScaledConstants();
+      updateElementScaleLabel();
+      stopQubitAnimations();
+      movieData.zones.forEach((zone) => {{
+        applyZoneOrientation(zone);
+        updateZoneGraphics(zone.id, false);
+      }});
+      movieData.junctions.forEach((junction) => updateJunctionGraphics(junction.id, false));
+      edgeVisuals.forEach((edgeVisual) => {{
+        edgeVisual.line.setAttribute("stroke-width", String(edgeStrokeWidth));
+      }});
+      qubitElements.forEach((qubitElement) => {{
+        qubitElement.circle.setAttribute("stroke-width", String(qubitStrokeWidth));
+        qubitElement.text.setAttribute("font-size", String(qubitLabelFontSize));
+      }});
+      updateEdgePositions();
+      renderFrame(frameIndex, false);
     }}
 
     function qubitTransforms(frame) {{
@@ -1249,7 +1344,7 @@ def generate_multi_zone_circuit_movie_html(
       const length = Math.hypot(dx, dy) || 1;
       const directionX = dx / length;
       const directionY = dy / length;
-      const chainSpacing = 12;
+      const chainSpacing = 12 * elementScale;
       const token = shuttleAnimationToken;
       const shuttleQubitPositions = new Map();
       frame.shuttle.qubits.forEach((qubit, shuttleIndex) => {{
@@ -1475,6 +1570,8 @@ def generate_multi_zone_circuit_movie_html(
       }}
     }});
 
+    elementScaleInput.addEventListener("input", applyElementScaleFromControl);
+
     renderFrame(frameIndex);
   </script>
 </body>
@@ -1488,6 +1585,7 @@ def write_multi_zone_circuit_movie_html(  # noqa PLR0913
     *,
     title: str | None = None,
     frame_duration_ms: float = 300.0,
+    element_scale: float = 1.0,
     highlight_upcoming_qubits: bool = True,
     condense_quantum_ops: bool = True,
 ) -> Path:
@@ -1497,6 +1595,7 @@ def write_multi_zone_circuit_movie_html(  # noqa PLR0913
             circuit,
             title=title,
             frame_duration_ms=frame_duration_ms,
+            element_scale=element_scale,
             highlight_upcoming_qubits=highlight_upcoming_qubits,
             condense_quantum_ops=condense_quantum_ops,
         ),
@@ -2007,28 +2106,17 @@ def _zone_dimensions(circuit: MultiZoneCircuit) -> tuple[float, float]:
         circuit.architecture.get_zone_max_ions_transport(zone)
         for zone in range(circuit.architecture.n_zones)
     )
-    ideal_width = min(
-        _ZONE_MAX_WIDTH,
-        max(
-            _ZONE_MIN_WIDTH,
-            (2 * _SLOT_MARGIN_X) + ((max_transport_capacity - 1) * _SLOT_GAP_X) + 24,
-        ),
+    ideal_width = max(
+        _ZONE_MIN_WIDTH,
+        (2 * _SLOT_MARGIN_X) + ((max_transport_capacity - 1) * _SLOT_GAP_X),
     )
-    available_width = _SVG_WIDTH - (2 * _LAYOUT_MARGIN_X)
-    max_zones_per_row = max(
-        1, int((available_width + _ZONE_GAP_X) // (_ZONE_MIN_WIDTH + _ZONE_GAP_X))
-    )
-    zones_per_row = min(circuit.architecture.n_zones, max_zones_per_row)
-    fitted_width = (
-        available_width - ((zones_per_row - 1) * _ZONE_GAP_X)
-    ) / zones_per_row
-    return min(ideal_width, fitted_width), _ZONE_HEIGHT
+    return ideal_width, _ZONE_HEIGHT
 
 
 def _slot_centers(layout: _SlotLayout) -> list[dict[str, float]]:
     if layout.transport_capacity < 1:
         return []
-    slot_y = layout.y + (layout.height / 2) + 2
+    slot_y = layout.y + (layout.height / 2)
     usable_width = layout.width - (2 * _SLOT_MARGIN_X)
     slot_gap = min(_SLOT_GAP_X, usable_width / max(layout.transport_capacity - 1, 1))
     total_slots_width = slot_gap * max(layout.transport_capacity - 1, 0)

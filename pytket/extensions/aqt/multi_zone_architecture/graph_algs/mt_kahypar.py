@@ -11,6 +11,8 @@
 # WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 # See the License for the specific language governing permissions and
 # limitations under the License.
+import multiprocessing
+import time
 from dataclasses import dataclass
 from logging import getLogger
 
@@ -23,7 +25,7 @@ logger = getLogger(__name__)
 
 @dataclass
 class MtKahyparConfig:
-    n_threads: int = 1
+    n_threads: int = multiprocessing.cpu_count()
     random_seed: int = 13
 
 
@@ -35,6 +37,7 @@ def configure_mtkahypar(
 ) -> mtkahypar.Initializer:
     global MTK  # noqa: PLW0603
     if MTK is None:
+        print(f"Initializing MtKahypar with nthreads {config.n_threads}")
         mtkahypar.set_seed(config.random_seed)
         MTK = mtkahypar.initialize(config.n_threads)
     elif warn_configured:
@@ -48,10 +51,19 @@ def configure_mtkahypar(
 class MtKahyparPartitioner:
     """Class that performs graph partitioning using mt-kahypar"""
 
+    large_k_cutoff = 1024
+
     def __init__(self) -> None:
-        self.mtk = configure_mtkahypar(MtKahyparConfig(), warn_configured=False)
+        self.mtk = configure_mtkahypar(MtKahyparConfig(), warn_configured=True)
         self.context = self.mtk.context_from_preset(mtkahypar.PresetType.DEFAULT)
         self.context.logging = False
+
+    def _update_context(self, num_blocks: int) -> None:
+        return
+        if num_blocks > self.large_k_cutoff:
+            self.context = self.mtk.context_from_preset(mtkahypar.PresetType.LARGE_K)
+        else:
+            self.context = self.mtk.context_from_preset(mtkahypar.PresetType.DEFAULT)
 
     def graph_data_to_mtkahypar_graph(self, graph_data: GraphData) -> mtkahypar.Graph:
         return self.mtk.create_graph(
@@ -98,6 +110,7 @@ class MtKahyparPartitioner:
         :param graph_data: Graph specification
         :param num_parts: Number of partitions
         """
+        self._update_context(num_parts)
         avg_part_weight = sum(graph_data.vertex_weights) / num_parts
         self.context.set_partitioning_parameters(
             num_parts,
@@ -129,6 +142,9 @@ class MtKahyparPartitioner:
         :param hypergraph_data: Graph specification
         :param num_parts: Number of partitions
         """
+        self._update_context(num_parts)
+        hypergraph_data.print_hypergraph()
+        print(f"num_parts: {num_parts}")
         avg_part_weight = sum(hypergraph_data.vertex_weights) / num_parts
         self.context.set_partitioning_parameters(
             num_parts,
@@ -142,7 +158,10 @@ class MtKahyparPartitioner:
             self.context.set_individual_target_block_weights(
                 hypergraph_data.part_max_sizes
             )
+        partition_start = time.perf_counter()
         part_graph = graph.partition(self.context)
+        partition_seconds = time.perf_counter() - partition_start
+        print(f"partitioning time: {partition_seconds} seconds")
         dbg_msg = f"cut_cost: {part_graph.cut()}"
         logger.debug(dbg_msg)
         vertex_part_id: list[int] = []

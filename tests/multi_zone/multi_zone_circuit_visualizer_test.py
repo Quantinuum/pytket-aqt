@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -408,7 +409,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert "const duration = Math.max(120, currentFrameDuration() * 0.99);" in html
     assert "const directionX = dx / length;" in html
     assert "const directionY = dy / length;" in html
-    assert "const chainSpacing = 12;" in html
+    assert "const chainSpacing = 12 * elementScale;" in html
     assert "pointAlongPolyline(path.points, progress)" in html
     assert "x: point.x + chainOffsetX" in html
     assert "y: point.y + chainOffsetY" in html
@@ -432,7 +433,12 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     assert "x: port === 0 ? zone.x + zone.width : zone.x" in html
     assert "y: port === 0 ? zone.y : zone.y + zone.height" in html
     assert "function toggleZoneOrientation(zoneId)" in html
-    assert "function updateZoneGraphics(zoneId)" in html
+    assert "function updateZoneGraphics(zoneId, rerender = true)" in html
+    assert "function applyElementScaleFromControl()" in html
+    assert (
+        'elementScaleInput.addEventListener("input", applyElementScaleFromControl);'
+        in html
+    )
     assert 'rotateIcon.textContent = "↻";' in html
     assert (
         'box.addEventListener("pointerdown", (event) => startZoneDrag(zone.id, event));'
@@ -444,7 +450,7 @@ def test_generate_multi_zone_circuit_movie_html_contains_visual_styling_and_moti
     )
     assert 'rotateHandle.addEventListener("pointerdown", (event) => {' in html
     assert "function startJunctionDrag(junctionId, event)" in html
-    assert "function updateJunctionGraphics(junctionId)" in html
+    assert "function updateJunctionGraphics(junctionId, rerender = true)" in html
     assert 'class: "junction-node"' in html
     assert "junction-label" not in html
     assert 'svg.addEventListener("pointermove", handleDrag);' in html
@@ -590,7 +596,32 @@ def test_generate_multi_zone_circuit_movie_html_uses_custom_frame_duration() -> 
     )
 
 
-def test_zone_layout_wraps_linear_architecture_without_overlap() -> None:
+def test_generate_multi_zone_circuit_movie_html_uses_element_scale() -> None:
+    circuit = _compiled_visualizer_circuit()
+
+    html = generate_multi_zone_circuit_movie_html(
+        circuit, title="Scaled Elements", element_scale=0.6
+    )
+
+    assert '"element_scale": 0.6' in html
+    assert 'label for="element-scale" class="frame-label">element scale</label>' in html
+    assert (
+        '<input id="element-scale" type="range" min="0.35" max="1.5" '
+        'step="0.05" value=0.6>'
+    ) in html
+    assert "let elementScale = Number(elementScaleInput.value);" in html
+
+
+def test_generate_multi_zone_circuit_movie_html_rejects_non_positive_element_scale() -> (
+    None
+):
+    circuit = _compiled_visualizer_circuit()
+
+    with pytest.raises(ValueError, match="element_scale must be positive"):
+        generate_multi_zone_circuit_movie_html(circuit, element_scale=0)
+
+
+def test_zone_layout_places_linear_architecture_without_overlap() -> None:
     circuit = _linear_8_zone_visualizer_circuit()
 
     zones = _zone_layout(circuit)
@@ -606,8 +637,23 @@ def test_zone_layout_wraps_linear_architecture_without_overlap() -> None:
                 and other_zone["y"] < zone["y"] + zone["height"]
             )
             assert not (overlaps_horizontally and overlaps_vertically)
-    assert len({zone["y"] for zone in zones}) > 1
-    assert all(zone["height"] == 52 for zone in zones)
+    assert all(zone["height"] == 34 for zone in zones)
+
+
+def test_zone_layout_keeps_slot_centers_from_overlapping_qubits() -> None:
+    architecture = MultiZoneArchitectureSpec(
+        n_qubits_max=7,
+        n_zones=1,
+        zones=[Zone(max_ions_gate_op=7)],
+        connections=[],
+    )
+    circuit = MultiZoneCircuit(architecture, {0: list(range(7))}, 7)
+
+    (zone,) = _zone_layout(circuit)
+    slot_xs = [slot["x"] for slot in zone["slots"]]
+
+    assert zone["width"] == pytest.approx(242)
+    assert all(right - left >= 30 for left, right in pairwise(slot_xs))
 
 
 @pytest.mark.parametrize(

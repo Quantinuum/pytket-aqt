@@ -13,6 +13,7 @@
 # limitations under the License.
 import logging
 import math
+import time
 
 from pytket.circuit import Command
 
@@ -112,12 +113,18 @@ class HypergraphPartitionGateSelector(GateSelector):
     ) -> ZonePlacement:
         num_zones = dyn_arch.n_zones
         n_qubits = dyn_arch.n_qubits
+        data_generation = time.perf_counter()
         shuttle_graph_data = self.get_circuit_shuttle_hypergraph_data(
             dyn_arch, depth_info
         )
+        data_generation = time.perf_counter() - data_generation
         partitioner = MtKahyparPartitioner()
         log_depth_info(depth_info)
+        partitioning = time.perf_counter()
         vertex_to_part = partitioner.partition_hypergraph(shuttle_graph_data, num_zones)
+        partitioning = time.perf_counter() - partitioning
+        print(f"data generation time: {data_generation} seconds")
+        print(f"partitioning time: {partitioning} seconds")
         new_placement: ZonePlacement = [[] for _ in range(num_zones)]
         part_to_zone = [-1] * num_zones
         for vertex in range(n_qubits, n_qubits + num_zones):
@@ -179,6 +186,7 @@ class HypergraphPartitionGateSelector(GateSelector):
         max_gate_weight = 50000
 
         # add gate hyperedges
+        gate_hyperedges_time = time.perf_counter()
         for depth, blocks in enumerate(depth_blocks[:cutoff_depth]):
             for block in blocks:
                 weight = max_gate_weight - math.floor(
@@ -192,8 +200,11 @@ class HypergraphPartitionGateSelector(GateSelector):
                 else:
                     nets.append(list(block))
                     net_weights.append(weight)
+        gate_hyperedges_time = time.perf_counter() - gate_hyperedges_time
+        print(f"gate hyperedges time: {gate_hyperedges_time} seconds")
 
         # add shuttling penalty
+        shuttling_penalty_time = time.perf_counter()
         max_shuttle_weight = math.floor(max_gate_weight * 0.8)
         for zone, qubits in enumerate(dyn_arch.trap_configuration.zone_placement):
             for qubit in qubits:
@@ -214,6 +225,8 @@ class HypergraphPartitionGateSelector(GateSelector):
                         continue
                     nets.append([qubit, other_zone + n_qubits])
                     net_weights.append(weight)
+        shuttling_penalty_time = time.perf_counter() - shuttling_penalty_time
+        print(f"shuttling penalty time: {shuttling_penalty_time} seconds")
 
         num_vertices = num_spots
         vertex_weights = [1 for _ in range(num_vertices)]
