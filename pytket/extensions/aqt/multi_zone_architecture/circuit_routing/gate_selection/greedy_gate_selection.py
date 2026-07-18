@@ -12,8 +12,6 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-from copy import deepcopy
-
 from pytket.circuit import Command, OpType
 
 from ...circuit.helpers import ZonePlacement
@@ -117,22 +115,19 @@ class GreedyGateSelector(GateSelector):
     ) -> None:
         n_qubits = dyn_arch.n_qubits
         # locked qubits have already been assigned a zone in the new config and should therefore not move again
-        locked_qubits = []
+        locked_qubits: set[int] = set()
         # must wait qubits have had a 2 qubit gate that could not be implemented in the new config
         # thus any following 2 qubit gate involving them will not be implementable in the new config
-        must_wait_qubits: list[int] = []
+        must_wait_qubits: set[int] = set()
+        remaining_gate_zone_spots = sum(
+            int(dyn_arch.zone_max_gate_cap[gate_zone])
+            for gate_zone in dyn_arch.gate_zones
+        )
         for depth in depth_list:
             for pair in depth:
                 # If all qubits must wait or no more spots are available in gate zones, we can stop
-                max_gate_zone_free_space = max(
-                    [
-                        dyn_arch.zone_max_gate_cap[gz]
-                        - qubit_tracker.n_zone_new_occupants(gz)
-                        for gz in dyn_arch.gate_zones
-                    ]
-                )
-                if len(must_wait_qubits) == n_qubits or max_gate_zone_free_space == 0:
-                    break
+                if len(must_wait_qubits) == n_qubits or remaining_gate_zone_spots == 0:
+                    return
 
                 qubit0 = pair[0]
                 qubit1 = pair[1]
@@ -152,7 +147,7 @@ class GreedyGateSelector(GateSelector):
                     if zone0 != zone1:
                         # if not in same zone, gate cannot be implemented
                         # so new gates involving these qubits must wait
-                        must_wait_qubits.extend([qubit0, qubit1])
+                        must_wait_qubits.update([qubit0, qubit1])
                     continue
 
                 # handle only one locked
@@ -164,9 +159,10 @@ class GreedyGateSelector(GateSelector):
                         dyn_arch, locked_q, other_q, qubit_tracker
                     )
                     if implementable:
-                        locked_qubits.append(other_q)
+                        locked_qubits.add(other_q)
+                        remaining_gate_zone_spots -= 1
                     else:
-                        must_wait_qubits.append(other_q)
+                        must_wait_qubits.add(other_q)
                     continue
 
                 # starting here, neither qubit is locked
@@ -191,15 +187,19 @@ class GreedyGateSelector(GateSelector):
                 num_spots_needed = 2
 
                 if is_gate_zone0 and free_space_zone_0 >= num_spots_needed:
-                    qubit_tracker.lock_qubit(qubit0, zone0, zone0)
-                    qubit_tracker.lock_qubit(qubit1, zone1, zone0)
-                    locked_qubits.extend([qubit0, qubit1])
+                    lock_qubits_to_zone(
+                        qubit_tracker, [(qubit0, zone0), (qubit1, zone1)], zone0
+                    )
+                    locked_qubits.update([qubit0, qubit1])
+                    remaining_gate_zone_spots -= 2
                     continue
 
                 if is_gate_zone1 and free_space_zone_1 >= num_spots_needed:
-                    qubit_tracker.lock_qubit(qubit0, zone0, zone1)
-                    qubit_tracker.lock_qubit(qubit1, zone1, zone1)
-                    locked_qubits.extend([qubit0, qubit1])
+                    lock_qubits_to_zone(
+                        qubit_tracker, [(qubit0, zone0), (qubit1, zone1)], zone1
+                    )
+                    locked_qubits.update([qubit0, qubit1])
+                    remaining_gate_zone_spots -= 2
                     continue
 
                 # try to find the closest gate zone with two available spots
@@ -210,16 +210,29 @@ class GreedyGateSelector(GateSelector):
                     qubit_tracker,
                 )
                 if closest_zone is not None:
-                    qubit_tracker.lock_qubit(qubit0, zone0, closest_zone)
-                    qubit_tracker.lock_qubit(qubit1, zone1, closest_zone)
-                    locked_qubits.extend([qubit0, qubit1])
+                    lock_qubits_to_zone(
+                        qubit_tracker,
+                        [(qubit0, zone0), (qubit1, zone1)],
+                        closest_zone,
+                    )
+                    locked_qubits.update([qubit0, qubit1])
+                    remaining_gate_zone_spots -= 2
                     continue
 
-                must_wait_qubits.extend([qubit0, qubit1])
+                must_wait_qubits.update([qubit0, qubit1])
                 # If made it here:
                 # No longer any gate zones left with two spots available
                 # A gate with one locked qubit in a zone with one space
                 # left could still be implemented, so continue loop
+
+
+def lock_qubits_to_zone(
+    qubit_tracker: QubitTracker,
+    qubit_zones: list[tuple[int, int]],
+    target_zone: int,
+) -> None:
+    for qubit, current_zone in qubit_zones:
+        qubit_tracker.lock_qubit(qubit, current_zone, target_zone)
 
 
 def handle_only_single_qubits_remaining(
@@ -229,13 +242,12 @@ def handle_only_single_qubits_remaining(
     qubit_tracker: QubitTracker,
 ) -> None:
     # locked qubits have already been assigned a zone in the new config and should therefore not move again
-    locked_qubits = []
+    locked_qubits: set[int] = set()
     for cmd in remaining_commands:
         if cmd.op.type == OpType.Barrier:
             continue
         qubit0 = cmd.args[0].index[0]
-        is_locked_0 = qubit0 in locked_qubits
-        if is_locked_0:
+        if qubit0 in locked_qubits:
             continue
         zone0 = qubit_tracker.current_zone(qubit0)
         is_gate_zone0 = dyn_arch.is_gate_zone(zone0)
@@ -244,7 +256,7 @@ def handle_only_single_qubits_remaining(
         ] - qubit_tracker.n_zone_new_occupants(zone0)
         if is_gate_zone0 and free_space_zone_0 >= 1:
             qubit_tracker.lock_qubit(qubit0, zone0, zone0)
-            locked_qubits.append(qubit0)
+            locked_qubits.add(qubit0)
             continue
 
         # try to find the closest gate zone with two available spots
@@ -256,20 +268,20 @@ def handle_only_single_qubits_remaining(
         )
         if closest_zone is not None:
             qubit_tracker.lock_qubit(qubit0, zone0, closest_zone)
-            locked_qubits.extend([qubit0])
+            locked_qubits.add(qubit0)
             continue
         # if closest_zone is None, there are no more gate zone spots available
         break
 
 
-def handle_must_wait(qubit0: int, qubit1: int, must_wait_qubits: list[int]) -> bool:
+def handle_must_wait(qubit0: int, qubit1: int, must_wait_qubits: set[int]) -> bool:
     must_wait_0 = qubit0 in must_wait_qubits
     must_wait_1 = qubit1 in must_wait_qubits
     if must_wait_0 or must_wait_1:
         if must_wait_0 and not must_wait_1:
-            must_wait_qubits.append(qubit1)
+            must_wait_qubits.add(qubit1)
         if must_wait_1 and not must_wait_0:
-            must_wait_qubits.append(qubit0)
+            must_wait_qubits.add(qubit0)
         return True
     return False
 
@@ -312,9 +324,7 @@ def find_best_gate_zone_to_move_to(
 
     Return gate zone id or None if no gate zone available with two spots
     """
-    min_metric = (
-        dyn_arch.n_zones * 100
-    )  # this is strictly larger than the largest possible
+    min_metric = float("inf")
     best_gate_zone = -1
     for gate_zone in dyn_arch.gate_zones:
         free_space = dyn_arch.zone_max_gate_cap[
@@ -342,12 +352,46 @@ def gate_zone_metric(
 
     Prefers gate zones with low total distance
     """
+    if cost_model.__class__ is ShuttlePSwapCostModel:
+        return sum(
+            single_qubit_pswap_move_cost(dyn_arch, qubit, zone, gate_zone)
+            for qubit, zone in qubit_zones
+        )
     return sum(
         unwrap_move_cost_result(
             cost_model.move_cost(dyn_arch, [qubit], zone, gate_zone)
         ).path_cost
         for qubit, zone in qubit_zones
     )
+
+
+def single_qubit_pswap_move_cost(
+    dyn_arch: DynamicArch,
+    qubit: int,
+    src_zone: int,
+    trg_zone: int,
+) -> int:
+    """Fast path for ShuttlePSwapCostModel.move_cost(..., [qubit], ...)."""
+    path_lengths_from_port_0 = dyn_arch.closest_target_zone_port_path_lengths(
+        src_zone, 0
+    )
+    path_lengths_from_port_1 = dyn_arch.closest_target_zone_port_path_lengths(
+        src_zone, 1
+    )
+    path_length_0 = path_lengths_from_port_0[trg_zone]
+    path_length_1 = path_lengths_from_port_1[trg_zone]
+    qubit_position = int(dyn_arch.qubit_to_zone_pos[qubit, 1])
+    swap_cost = int(dyn_arch.zone_swap_costs[src_zone])
+    port_1_position = int(dyn_arch.zone_occupancy[src_zone]) - 1
+
+    distances = []
+    if path_length_0 is not None:
+        distances.append(path_length_0 + qubit_position * swap_cost)
+    if path_length_1 is not None:
+        distances.append(path_length_1 + (port_1_position - qubit_position) * swap_cost)
+    if not distances:
+        raise ValueError("Could note determine path")
+    return min(distances)
 
 
 def move_qubits_to_closest_available_spots(
@@ -366,7 +410,7 @@ def move_qubits_to_closest_available_spots(
 
     Return gate zone id or None if no gate zone available with two spots
     """
-    qubits = deepcopy(zone_qubits)
+    qubits = zone_qubits.copy()
     # just use the position of the first qubit as approximation instead of getting
     # "closest zones" for each qubit separately
     for zone in cost_model.closest_zones(dyn_arch, qubits[0], starting_zone):

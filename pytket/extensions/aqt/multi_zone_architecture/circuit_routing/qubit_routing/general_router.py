@@ -1,7 +1,6 @@
 import itertools
 from collections import defaultdict
 from collections.abc import Callable, Iterable, Iterator
-from copy import deepcopy
 from dataclasses import dataclass
 from typing import Any
 
@@ -62,6 +61,7 @@ class GeneralRouter(Router):
         qubits_to_move = get_needed_movements(
             starting_config.n_qubits, starting_config.zone_placement, target_placement
         )
+        pending_move_groups = group_needed_movements(qubits_to_move)
 
         def free_space_in_zone_func(zon: int) -> int:
             # use the transport limit - 1 >= gate limit as the base capacity,
@@ -73,9 +73,9 @@ class GeneralRouter(Router):
         move_ops: list[RoutingOp] = [RoutingBarrier()]
         soft_locked = False  # soft locked means only
         transport_blocked_zone = None
-        while qubits_to_move:
+        while pending_move_groups:
             move_groups = get_move_groups(
-                qubits_to_move,
+                pending_move_groups,
                 transport_blocked_zone,
                 free_space_in_zone_func,
             )
@@ -97,10 +97,12 @@ class GeneralRouter(Router):
             )
 
             # remove moves that were made
-            for q in optimal_move_group_result.qubits:
-                qubits_to_move.remove(
-                    (q, chosen_move_group.source, chosen_move_group.target)
-                )
+            remove_moved_qubits_from_group(
+                pending_move_groups,
+                chosen_move_group.source,
+                chosen_move_group.target,
+                optimal_move_group_result.qubits,
+            )
 
         return RoutingResult(total_cost, move_ops)
 
@@ -119,6 +121,9 @@ class GeneralRouter(Router):
         self, dyn_arch: DynamicArch, move_groups: list[MoveGroup]
     ) -> Iterator[MoveGroupPath]:
         for move_group in move_groups:
+            move_group.qubits.sort(
+                key=lambda qubit: dyn_arch.qubit_to_zone_pos[qubit, 1]
+            )
             max_n_move = min(len(move_group.qubits), move_group.target_free_space)
             for n_move in range(max_n_move, 0, -1):
                 result = self.get_move_path_cost(dyn_arch, move_group, n_move)
@@ -132,8 +137,6 @@ class GeneralRouter(Router):
     ) -> tuple[list[int], list[int], int] | None:
         src = move_group.source
         trg = move_group.target
-        # Make sure qubits are ordered the same as in src zone
-        move_group.qubits.sort(key=lambda x: dyn_arch.qubit_to_zone_pos[x][1])
 
         qubits_indx_0 = move_group.qubits[:n_move]
         qubits_indx_1 = move_group.qubits[-n_move:]
@@ -253,7 +256,7 @@ def swap_through_zone_and_shuttle_internal_qubits(
     else:
         # reversing makes logic same for moving to port 1 instead of port 0
         qubit_src_iter = reversed(qubits_index_to_move)
-        qubits_zone = deepcopy(zone_qubits)
+        qubits_zone = zone_qubits.copy()
 
     for qubit, index in qubit_src_iter:
         ops.extend(
@@ -321,6 +324,34 @@ def get_needed_movements(
     ]
 
 
+def group_needed_movements(
+    qubits_to_move: list[tuple[int, int, int]],
+) -> dict[tuple[int, int], list[int]]:
+    grouped: dict[tuple[int, int], list[int]] = defaultdict(list)
+    for qubit, src, trg in qubits_to_move:
+        grouped[(src, trg)].append(qubit)
+    return dict(grouped)
+
+
+def remove_moved_qubits_from_group(
+    pending_move_groups: dict[tuple[int, int], list[int]],
+    src: int,
+    trg: int,
+    moved_qubits: list[int],
+) -> None:
+    group_key = (src, trg)
+    moved_qubits_set = set(moved_qubits)
+    remaining_qubits = [
+        qubit
+        for qubit in pending_move_groups[group_key]
+        if qubit not in moved_qubits_set
+    ]
+    if remaining_qubits:
+        pending_move_groups[group_key] = remaining_qubits
+    else:
+        del pending_move_groups[group_key]
+
+
 def validate_complete_target_placement(
     n_qubits: int, target_placement: ZonePlacement
 ) -> None:
@@ -345,24 +376,21 @@ def validate_complete_target_placement(
 
 
 def get_move_groups(
-    qubits_to_move: list[tuple[int, int, int]],
+    grouped_moves: dict[tuple[int, int], list[int]],
     transport_blocked_zone: int | None,
     free_space_in_zone_func: Callable[[int], int],
 ) -> list[MoveGroup]:
-    grouped = defaultdict(list)
-    for qubit, src, trg in qubits_to_move:
-        grouped[(src, trg)].append(qubit)
     return (
         [
-            MoveGroup(grouped_qbts, src, trg, free_space_in_zone_func(trg))
-            for (src, trg), grouped_qbts in grouped.items()
+            MoveGroup(grouped_qbts.copy(), src, trg, free_space_in_zone_func(trg))
+            for (src, trg), grouped_qbts in grouped_moves.items()
         ]
         if transport_blocked_zone is None
         else [
             # If a zone is transport blocked, only consider moves out of it, in order to unblock it
             # There must be one since the end state is not allowed to be transport blocked
-            MoveGroup(grouped_qbts, src, trg, free_space_in_zone_func(trg))
-            for (src, trg), grouped_qbts in grouped.items()
+            MoveGroup(grouped_qbts.copy(), src, trg, free_space_in_zone_func(trg))
+            for (src, trg), grouped_qbts in grouped_moves.items()
             if src == transport_blocked_zone
         ]
     )

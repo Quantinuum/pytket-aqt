@@ -20,7 +20,7 @@ from pytket.circuit import Command
 from ...circuit.helpers import TrapConfiguration, ZonePlacement
 from ...depth_list.depth_list import (
     DepthInfo,
-    depth_info_from_command_list,
+    depth_info_from_command_list_until_block_size_exceeds,
 )
 from ...graph_algs.graph import HypergraphData
 from ...graph_algs.mt_kahypar_check import (
@@ -64,18 +64,14 @@ class HypergraphPartitionGateSelector(GateSelector):
     in zones
 
     :param cost_model: Cost model for estimating movement costs
-    :param max_depth: Maximum depth used for 2 qubit gate edges
-     in model graph
     """
 
     def __init__(
         self,
         cost_model: RoutingCostModel = _DEFAULT_COST_MODEL,
-        max_depth: int = 50,
         only_place_gate_qubits: bool = False,
     ):
         self._cost_model = cost_model
-        self._max_depth = max_depth
         self._only_specify_gate_qubits = only_place_gate_qubits
 
     def only_places_gate_qubits(self) -> bool:
@@ -98,7 +94,11 @@ class HypergraphPartitionGateSelector(GateSelector):
         """
         current_configuration = dyn_arch.trap_configuration
         n_qubits = current_configuration.n_qubits
-        depth_info = depth_info_from_command_list(n_qubits, remaining_commands)
+        depth_info = depth_info_from_command_list_until_block_size_exceeds(
+            n_qubits,
+            remaining_commands,
+            dyn_arch.largest_gate_zone_max_capacity,
+        )
         if depth_info.depth_list:
             return self.handle_2qb_gates_remaining(
                 dyn_arch, depth_info, remaining_commands
@@ -177,24 +177,15 @@ class HypergraphPartitionGateSelector(GateSelector):
         net_weights: list[int] = []
 
         depth_blocks = depth_info.depth_blocks
-        cutoff_depth = 1
-        for _, blocks in enumerate(
-            depth_blocks[1:]
-        ):  # at depth 0 all blocks are size 2
-            min_block_size = min(len(block) for block in blocks)
-            if min_block_size > dyn_arch.largest_gate_zone_max_capacity:
-                break
-            cutoff_depth += 1
-
         max_gate_weight = 50000
 
         # add gate hyperedges
         gate_hyperedges_time = time.perf_counter()
-        for depth, blocks in enumerate(depth_blocks[:cutoff_depth]):
+        for depth, blocks in enumerate(depth_blocks):
+            weight = max_gate_weight - math.floor(depth * max_gate_weight * 0.01)
+            if weight < 1:
+                break
             for block in blocks:
-                weight = max_gate_weight - math.floor(
-                    depth * max_gate_weight * 0.01
-                )  # reduce by 5% per depth
                 if dyn_arch.has_memory_zones:
                     for zone in dyn_arch.gate_zones:
                         net = [*list(block), zone + n_qubits]

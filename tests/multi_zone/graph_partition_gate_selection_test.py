@@ -23,9 +23,13 @@ from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.command_filte
 )
 from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.greedy_gate_selection import (
     GreedyGateSelector,
+    gate_zone_metric,
 )
 from pytket.extensions.aqt.multi_zone_architecture.graph_algs.mt_kahypar_check import (
     MT_KAHYPAR_INSTALLED,
+)
+from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.cost_model import (
+    ShuttlePSwapCostModel,
 )
 from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.dynamic_architecture import (
     DynamicArch,
@@ -67,6 +71,32 @@ def test_greedy_gate_selector_only_places_gate_qubits_for_single_qubit_round() -
     )
 
     assert _flatten(placement) == {0}
+
+
+def test_optimized_greedy_gate_zone_metric_matches_generic_cost_model() -> None:
+    dyn_arch = _make_dynamic_arch([[0, 1], [], [2, 3], []])
+    qubit_zones = [(0, 0), (3, 2)]
+    gate_zone = 1
+
+    class DelegatingPSwapCostModel:
+        def __init__(self) -> None:
+            self._delegate = ShuttlePSwapCostModel()
+
+        def move_cost(self, *args, **kwargs):
+            return self._delegate.move_cost(*args, **kwargs)
+
+        def move_cost_src_port_0(self, *args, **kwargs):
+            return self._delegate.move_cost_src_port_0(*args, **kwargs)
+
+        def move_cost_src_port_1(self, *args, **kwargs):
+            return self._delegate.move_cost_src_port_1(*args, **kwargs)
+
+        def closest_zones(self, *args, **kwargs):
+            return self._delegate.closest_zones(*args, **kwargs)
+
+    assert gate_zone_metric(
+        dyn_arch, ShuttlePSwapCostModel(), gate_zone, qubit_zones
+    ) == gate_zone_metric(dyn_arch, DelegatingPSwapCostModel(), gate_zone, qubit_zones)
 
 
 @graph_skipif

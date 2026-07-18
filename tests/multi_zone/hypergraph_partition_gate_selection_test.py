@@ -18,6 +18,11 @@ from pytket import Circuit
 from pytket.extensions.aqt.multi_zone_architecture.circuit.helpers import (
     TrapConfiguration,
 )
+from pytket.extensions.aqt.multi_zone_architecture.depth_list.depth_list import (
+    DepthInfo,
+    depth_info_from_command_list,
+    depth_info_from_command_list_until_block_size_exceeds,
+)
 from pytket.extensions.aqt.multi_zone_architecture.graph_algs.mt_kahypar_check import (
     MT_KAHYPAR_INSTALLED,
 )
@@ -52,6 +57,23 @@ def _make_dynamic_arch(zone_placement: list[list[int]]) -> DynamicArch:
 
 def _flatten(placement: list[list[int]]) -> set[int]:
     return {qubit for zone_qubits in placement for qubit in zone_qubits}
+
+
+def test_bounded_depth_info_stops_when_blocks_exceed_gate_capacity() -> None:
+    circ = Circuit(4)
+    circ.CX(0, 1)
+    circ.CX(2, 3)
+    circ.CX(1, 2)
+    circ.CX(0, 3)
+
+    full_depth_info = depth_info_from_command_list(4, circ.get_commands())
+    bounded_depth_info = depth_info_from_command_list_until_block_size_exceeds(
+        4, circ.get_commands(), max_block_size=2
+    )
+
+    assert len(full_depth_info.depth_blocks) == 2
+    assert bounded_depth_info.depth_list == full_depth_info.depth_list[:1]
+    assert bounded_depth_info.depth_blocks == full_depth_info.depth_blocks[:1]
 
 
 @hypergraph_skipif
@@ -134,3 +156,20 @@ def test_optimized_shuttling_hyperedges_match_generic_cost_model() -> None:
 
     assert fast_nets == generic_nets
     assert fast_weights == generic_weights
+
+
+@hypergraph_skipif
+def test_hypergraph_gate_hyperedges_skip_nonpositive_weights() -> None:
+    dyn_arch = _make_dynamic_arch([[0, 1], [], [], []])
+    depth_info = DepthInfo(
+        depth_list=[],
+        depth_blocks=[[{0, 1}] for _ in range(105)],
+    )
+
+    hypergraph_data = (
+        HypergraphPartitionGateSelector().get_circuit_shuttle_hypergraph_data(
+            dyn_arch, depth_info
+        )
+    )
+
+    assert all(weight > 0 for weight in hypergraph_data.net_weights)

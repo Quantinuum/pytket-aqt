@@ -62,68 +62,102 @@ def get_2q_gate_pairs_from_commands(commands: list[Command]) -> list[tuple[int, 
     return pair_list
 
 
-def get_depth_info(n_qubits: int, gate_pairs: list[tuple[int, int]]) -> DepthInfo:  # noqa: PLR0912
+def get_depth_info(n_qubits: int, gate_pairs: list[tuple[int, int]]) -> DepthInfo:
     depth_list = get_depth_list(n_qubits, gate_pairs)
 
     if not depth_list:
         return DepthInfo([], [])
 
-    depth_blocks: DepthBlocks = []
+    depth_blocks, block_assignment = _initial_depth_blocks(n_qubits, depth_list[0])
+
+    for depth_layer in depth_list[1:]:
+        depth_blocks.append(
+            _next_depth_blocks(depth_blocks[-1], block_assignment, depth_layer)
+        )
+    return DepthInfo(depth_list, depth_blocks)
+
+
+def get_depth_info_until_block_size_exceeds(
+    n_qubits: int, gate_pairs: list[tuple[int, int]], max_block_size: int
+) -> DepthInfo:
+    depth_list = get_depth_list(n_qubits, gate_pairs)
+
+    if not depth_list:
+        return DepthInfo([], [])
+
+    depth_blocks, block_assignment = _initial_depth_blocks(n_qubits, depth_list[0])
+
+    for depth_layer in depth_list[1:]:
+        current_blocks = _next_depth_blocks(
+            depth_blocks[-1], block_assignment, depth_layer
+        )
+        if min(len(block) for block in current_blocks) > max_block_size:
+            break
+        depth_blocks.append(current_blocks)
+    return DepthInfo(depth_list[: len(depth_blocks)], depth_blocks)
+
+
+def _initial_depth_blocks(
+    n_qubits: int, depth_0_pairs: list[tuple[int, int]]
+) -> tuple[DepthBlocks, np.ndarray]:
+    depth_blocks: DepthBlocks = [[]]
     block_assignment = np.array([-1] * n_qubits, dtype=np.int64)
-    unique_pairs_depth_0 = {tuple(sorted(pair)) for pair in depth_list[0]}
-    depth_blocks.append([])
+    unique_pairs_depth_0 = {tuple(sorted(pair)) for pair in depth_0_pairs}
     for i, pair in enumerate(unique_pairs_depth_0):
         block_assignment[[pair[0], pair[1]]] = i
         depth_blocks[0].append(set(pair))
+    return depth_blocks, block_assignment
 
-    for depth_layer in depth_list[1:]:
-        current_blocks = deepcopy(depth_blocks[-1])
 
-        def merge_blocks(
-            block0_idx: int, block1_idx: int, current_blocks_loc: list[set[int]]
-        ) -> None:
-            """Merge two blocks into first and clear second"""
-            block1 = current_blocks_loc[block1_idx]
-            current_blocks_loc[block0_idx].update(block1)
-            block_assignment[list(block1)] = block0_idx
-            block1.clear()
+def _next_depth_blocks(
+    previous_blocks: list[set[int]],
+    block_assignment: np.ndarray,
+    depth_layer: list[tuple[int, int]],
+) -> list[set[int]]:
+    current_blocks = deepcopy(previous_blocks)
 
-        for pair in depth_layer:
-            current_block_q0 = block_assignment[pair[0]]
-            current_block_q1 = block_assignment[pair[1]]
-            match (current_block_q0, current_block_q1):
-                case (-1, -1):
-                    raise Exception("Should have been at lower depth")
-                case (-1, _):
-                    current_blocks[current_block_q1].add(pair[0])
-                    block_assignment[pair[0]] = current_block_q1
-                case (_, -1):
-                    current_blocks[current_block_q0].add(pair[1])
-                    block_assignment[pair[1]] = current_block_q0
-                case (a, b) if a != b:
-                    merge_blocks(current_block_q0, current_block_q1, current_blocks)
+    def merge_blocks(block0_idx: int, block1_idx: int) -> None:
+        """Merge two blocks into first and clear second."""
+        block1 = current_blocks[block1_idx]
+        current_blocks[block0_idx].update(block1)
+        block_assignment[list(block1)] = block0_idx
+        block1.clear()
 
-        # remove empty blocks
-        n_remove = 0
-        remove_tags: list[int | None] = [None] * len(current_blocks)
-        # tag blocks None -> Remove, int = position shift due to removal
-        for j, block in enumerate(current_blocks):
-            if len(block) == 0:
-                n_remove += 1
-            else:
-                remove_tags[j] = n_remove
-        # shift and remove blocks
-        for j in range(len(current_blocks) - 1, -1, -1):
-            tag = remove_tags[j]
-            if tag == 0:
-                # nothing left to do
-                break
-            if tag is None:
-                current_blocks.pop(j)
-            else:
-                block_assignment[list(current_blocks[j])] = j - tag
-        depth_blocks.append(current_blocks)
-    return DepthInfo(depth_list, depth_blocks)
+    for pair in depth_layer:
+        current_block_q0 = block_assignment[pair[0]]
+        current_block_q1 = block_assignment[pair[1]]
+        match (current_block_q0, current_block_q1):
+            case (-1, -1):
+                raise Exception("Should have been at lower depth")
+            case (-1, _):
+                current_blocks[current_block_q1].add(pair[0])
+                block_assignment[pair[0]] = current_block_q1
+            case (_, -1):
+                current_blocks[current_block_q0].add(pair[1])
+                block_assignment[pair[1]] = current_block_q0
+            case (a, b) if a != b:
+                merge_blocks(current_block_q0, current_block_q1)
+
+    # remove empty blocks
+    n_remove = 0
+    remove_tags: list[int | None] = [None] * len(current_blocks)
+    # tag blocks None -> Remove, int = position shift due to removal
+    for j, block in enumerate(current_blocks):
+        if len(block) == 0:
+            n_remove += 1
+        else:
+            remove_tags[j] = n_remove
+    # shift and remove blocks
+    for j in range(len(current_blocks) - 1, -1, -1):
+        tag = remove_tags[j]
+        if tag == 0:
+            # nothing left to do
+            break
+        if tag is None:
+            current_blocks.pop(j)
+        else:
+            block_assignment[list(current_blocks[j])] = j - tag
+    return current_blocks
 
 
 def get_depth_list(n_qubits: int, gate_pairs: list[tuple[int, int]]) -> DepthList:
@@ -170,3 +204,11 @@ def depth_info_from_command_list(n_qubits: int, commands: list[Command]) -> Dept
     """
     gate_pairs = get_2q_gate_pairs_from_commands(commands)
     return get_depth_info(n_qubits, gate_pairs)
+
+
+def depth_info_from_command_list_until_block_size_exceeds(
+    n_qubits: int, commands: list[Command], max_block_size: int
+) -> DepthInfo:
+    """Return depth info only up to layers whose blocks can fit in the given size."""
+    gate_pairs = get_2q_gate_pairs_from_commands(commands)
+    return get_depth_info_until_block_size_exceeds(n_qubits, gate_pairs, max_block_size)
