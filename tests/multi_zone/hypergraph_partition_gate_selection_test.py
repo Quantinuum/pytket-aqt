@@ -32,6 +32,9 @@ if MT_KAHYPAR_INSTALLED:
     from pytket.extensions.aqt.multi_zone_architecture.circuit_routing.gate_selection.hypergraph_partition_gate_selection import (
         HypergraphPartitionGateSelector,
     )
+    from pytket.extensions.aqt.multi_zone_architecture.trap_architecture.cost_model import (
+        ShuttlePSwapCostModel,
+    )
 
 
 hypergraph_skipif = pytest.mark.skipif(
@@ -92,3 +95,42 @@ def test_hypergraph_partition_gate_selector_only_places_gate_qubits(
     ).next_config(dyn_arch, circ.get_commands())
 
     assert placement == [[], [0, 1, 2], [], []]
+
+
+@hypergraph_skipif
+def test_optimized_shuttling_hyperedges_match_generic_cost_model() -> None:
+    dyn_arch = _make_dynamic_arch([[0, 1], [], [2, 3], []])
+    max_shuttle_weight = 40000
+
+    fast_nets: list[list[int]] = []
+    fast_weights: list[int] = []
+    HypergraphPartitionGateSelector().add_shuttling_penalty_hyperedges(
+        dyn_arch, fast_nets, fast_weights, max_shuttle_weight
+    )
+
+    class DelegatingPSwapCostModel:
+        def __init__(self) -> None:
+            self._delegate = ShuttlePSwapCostModel()
+
+        def move_cost(self, *args, **kwargs):
+            return self._delegate.move_cost(*args, **kwargs)
+
+        def move_cost_src_port_0(self, *args, **kwargs):
+            return self._delegate.move_cost_src_port_0(*args, **kwargs)
+
+        def move_cost_src_port_1(self, *args, **kwargs):
+            return self._delegate.move_cost_src_port_1(*args, **kwargs)
+
+        def closest_zones(self, *args, **kwargs):
+            return self._delegate.closest_zones(*args, **kwargs)
+
+    generic_nets: list[list[int]] = []
+    generic_weights: list[int] = []
+    HypergraphPartitionGateSelector(
+        cost_model=DelegatingPSwapCostModel()
+    ).add_shuttling_penalty_hyperedges(
+        dyn_arch, generic_nets, generic_weights, max_shuttle_weight
+    )
+
+    assert fast_nets == generic_nets
+    assert fast_weights == generic_weights

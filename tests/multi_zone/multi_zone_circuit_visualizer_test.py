@@ -656,6 +656,35 @@ def test_zone_layout_keeps_slot_centers_from_overlapping_qubits() -> None:
     assert all(right - left >= 30 for left, right in pairwise(slot_xs))
 
 
+def test_zone_layout_uses_each_zones_own_capacity() -> None:
+    architecture = MultiZoneArchitectureSpec(
+        n_qubits_max=0,
+        n_zones=3,
+        zones=[
+            Zone(max_ions_gate_op=2),
+            Zone(max_ions_gate_op=7),
+            Zone(max_ions_gate_op=2),
+        ],
+        connections=[
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=0, port_id=PortId.p1),
+                endpoint1=PortSpec(zone_id=1, port_id=PortId.p0),
+            ),
+            PhysicalConnection(
+                endpoint0=PortSpec(zone_id=1, port_id=PortId.p1),
+                endpoint1=PortSpec(zone_id=2, port_id=PortId.p0),
+            ),
+        ],
+    )
+    circuit = MultiZoneCircuit(architecture, {}, 0)
+
+    zones = {zone["id"]: zone for zone in _zone_layout(circuit)}
+
+    assert zones[0]["width"] == pytest.approx(zones[2]["width"])
+    assert zones[0]["width"] < zones[1]["width"]
+    assert zones[1]["width"] == pytest.approx(242)
+
+
 @pytest.mark.parametrize(
     ("centers", "expected_orientation"),
     [

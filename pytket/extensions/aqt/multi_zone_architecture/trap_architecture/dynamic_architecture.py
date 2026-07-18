@@ -89,6 +89,17 @@ class DynamicArch:
             src_zone, src_port, trg_zone, n_move
         )
 
+    def closest_target_zone_port_path_lengths(
+        self,
+        src_zone: int,
+        src_port: int,
+        n_move: int = 1,
+        cutoff: int | None = None,
+    ) -> list[int | None]:
+        return self._port_graph.closest_target_zone_port_path_lengths(
+            src_zone, src_port, n_move, cutoff
+        )
+
     def connection_ports(self, zone1: int, zone2: int) -> tuple[int, int]:
         port1, port2 = self._macro_arch.get_connected_ports(zone1, zone2)
         return port1.value, port2.value

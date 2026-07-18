@@ -1605,9 +1605,10 @@ def write_multi_zone_circuit_movie_html(  # noqa PLR0913
 
 
 def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
-    zone_width, zone_height = _zone_dimensions(circuit)
+    zone_dimensions = _zone_dimensions_by_zone(circuit)
+    max_zone_width, max_zone_height = _max_zone_dimensions(zone_dimensions)
     visualization_positions = _fitted_visualization_positions(
-        circuit, zone_width, zone_height
+        circuit, max_zone_width, max_zone_height
     )
     if ("zone", 0) in visualization_positions:
         centers = {
@@ -1619,15 +1620,13 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
             circuit,
             centers=centers,
             orientations=orientations,
-            zone_width=zone_width,
-            zone_height=zone_height,
+            zone_dimensions=zone_dimensions,
         )
 
     if circuit.macro_arch.is_linear_architecture:
         return _wrapped_linear_zone_layout(
             circuit,
-            zone_width=zone_width,
-            zone_height=zone_height,
+            zone_dimensions=zone_dimensions,
         )
 
     raw_port_positions = _raw_port_positions(circuit)
@@ -1644,15 +1643,15 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
         x_raw, y_raw = raw_positions[zone]
         center_x = (
             _LAYOUT_MARGIN_X
-            + (zone_width / 2)
+            + (max_zone_width / 2)
             + ((x_raw - min_x) / span_x)
-            * (_SVG_WIDTH - zone_width - (2 * _LAYOUT_MARGIN_X))
+            * (_SVG_WIDTH - max_zone_width - (2 * _LAYOUT_MARGIN_X))
         )
         center_y = (
             _LAYOUT_MARGIN_Y
-            + (zone_height / 2)
+            + (max_zone_height / 2)
             + ((y_raw - min_y) / span_y)
-            * (_SVG_HEIGHT - zone_height - (2 * _LAYOUT_MARGIN_Y))
+            * (_SVG_HEIGHT - max_zone_height - (2 * _LAYOUT_MARGIN_Y))
         )
         centers[zone] = (center_x, center_y)
 
@@ -1660,7 +1659,7 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
         circuit, centers, raw_port_positions
     )
     box_sizes = {
-        zone: _oriented_zone_dimensions(zone_width, zone_height, orientations[zone])
+        zone: _oriented_zone_dimensions(*zone_dimensions[zone], orientations[zone])
         for zone in range(circuit.architecture.n_zones)
     }
     centers = _enforce_minimum_zone_border_distance(
@@ -1672,8 +1671,7 @@ def _zone_layout(circuit: MultiZoneCircuit) -> list[dict[str, Any]]:
         circuit,
         centers=centers,
         orientations=orientations,
-        zone_width=zone_width,
-        zone_height=zone_height,
+        zone_dimensions=zone_dimensions,
     )
 
 
@@ -1682,11 +1680,11 @@ def _zone_layout_from_centers(
     *,
     centers: dict[int, tuple[float, float]],
     orientations: dict[int, int],
-    zone_width: float,
-    zone_height: float,
+    zone_dimensions: dict[int, tuple[float, float]],
 ) -> list[dict[str, Any]]:
     zones: list[dict[str, Any]] = []
     for zone in range(circuit.architecture.n_zones):
+        zone_width, zone_height = zone_dimensions[zone]
         center_x, center_y = centers[zone]
         x = center_x - (zone_width / 2)
         y = center_y - (zone_height / 2)
@@ -1728,7 +1726,7 @@ def _zone_layout_from_centers(
 def _junction_layout(
     circuit: MultiZoneCircuit, zones: list[dict[str, Any]]
 ) -> list[dict[str, Any]]:
-    zone_width, zone_height = _zone_dimensions(circuit)
+    zone_width, zone_height = _max_zone_dimensions(_zone_dimensions_by_zone(circuit))
     visualization_positions = _fitted_visualization_positions(
         circuit, zone_width, zone_height
     )
@@ -1988,58 +1986,70 @@ def _enforce_minimum_zone_border_distance(
 def _wrapped_linear_zone_layout(
     circuit: MultiZoneCircuit,
     *,
-    zone_width: float,
-    zone_height: float,
+    zone_dimensions: dict[int, tuple[float, float]],
 ) -> list[dict[str, Any]]:
-    n_zones = circuit.architecture.n_zones
     available_width = _SVG_WIDTH - (2 * _LAYOUT_MARGIN_X)
-    zones_per_row = max(
-        1, int((available_width + _ZONE_GAP_X) // (zone_width + _ZONE_GAP_X))
-    )
     ordered_zones = sorted(circuit.macro_arch.zone_graph.nodes())
+    rows: list[list[int]] = []
+    current_row: list[int] = []
+    current_row_width = 0.0
+    for zone in ordered_zones:
+        zone_id = int(zone)
+        zone_width = zone_dimensions[zone_id][0]
+        additional_width = zone_width if not current_row else _ZONE_GAP_X + zone_width
+        if current_row and current_row_width + additional_width > available_width:
+            rows.append(current_row)
+            current_row = [zone_id]
+            current_row_width = zone_width
+            continue
+        current_row.append(zone_id)
+        current_row_width += additional_width
+    if current_row:
+        rows.append(current_row)
+
     zones: list[dict[str, Any]] = []
-    for zone_index, zone in enumerate(ordered_zones):
-        row_index = zone_index // zones_per_row
-        col_index = zone_index % zones_per_row
-        zones_in_row = min(zones_per_row, n_zones - row_index * zones_per_row)
-        row_width = zones_in_row * zone_width + (max(zones_in_row - 1, 0) * _ZONE_GAP_X)
+    for row_index, row_zones in enumerate(rows):
+        row_width = sum(zone_dimensions[zone][0] for zone in row_zones) + (
+            max(len(row_zones) - 1, 0) * _ZONE_GAP_X
+        )
         x_start = (_SVG_WIDTH - row_width) / 2
-        x = x_start + col_index * (zone_width + _ZONE_GAP_X)
         y = _LAYOUT_MARGIN_Y + row_index * _ZONE_GAP_Y
-        zone_slots = _slot_centers(
-            _SlotLayout(
-                x=x,
-                y=y,
-                width=zone_width,
-                height=zone_height,
-                gate_capacity=circuit.architecture.get_zone_max_ions_gates(int(zone)),
-                transport_capacity=circuit.architecture.get_zone_max_ions_transport(
-                    int(zone)
-                ),
+        x = x_start
+        for zone in row_zones:
+            zone_width, zone_height = zone_dimensions[zone]
+            zone_slots = _slot_centers(
+                _SlotLayout(
+                    x=x,
+                    y=y,
+                    width=zone_width,
+                    height=zone_height,
+                    gate_capacity=circuit.architecture.get_zone_max_ions_gates(zone),
+                    transport_capacity=circuit.architecture.get_zone_max_ions_transport(
+                        zone
+                    ),
+                )
             )
-        )
-        zones.append(
-            {
-                "id": int(zone),
-                "x": round(x, 2),
-                "y": round(y, 2),
-                "width": zone_width,
-                "height": zone_height,
-                "base_width": zone_width,
-                "base_height": zone_height,
-                "center_x": round(x + (zone_width / 2), 2),
-                "center_y": round(y + (zone_height / 2), 2),
-                "orientation": 0,
-                "gate_capacity": circuit.architecture.get_zone_max_ions_gates(
-                    int(zone)
-                ),
-                "transport_capacity": circuit.architecture.get_zone_max_ions_transport(
-                    int(zone)
-                ),
-                "is_gate_zone": not circuit.architecture.zones[int(zone)].memory_only,
-                "slots": zone_slots,
-            }
-        )
+            zones.append(
+                {
+                    "id": zone,
+                    "x": round(x, 2),
+                    "y": round(y, 2),
+                    "width": zone_width,
+                    "height": zone_height,
+                    "base_width": zone_width,
+                    "base_height": zone_height,
+                    "center_x": round(x + (zone_width / 2), 2),
+                    "center_y": round(y + (zone_height / 2), 2),
+                    "orientation": 0,
+                    "gate_capacity": circuit.architecture.get_zone_max_ions_gates(zone),
+                    "transport_capacity": circuit.architecture.get_zone_max_ions_transport(
+                        zone
+                    ),
+                    "is_gate_zone": not circuit.architecture.zones[zone].memory_only,
+                    "slots": zone_slots,
+                }
+            )
+            x += zone_width + _ZONE_GAP_X
     return zones
 
 
@@ -2101,14 +2111,29 @@ def _raw_port_positions(
     }
 
 
-def _zone_dimensions(circuit: MultiZoneCircuit) -> tuple[float, float]:
-    max_transport_capacity = max(
-        circuit.architecture.get_zone_max_ions_transport(zone)
+def _zone_dimensions_by_zone(
+    circuit: MultiZoneCircuit,
+) -> dict[int, tuple[float, float]]:
+    return {
+        zone: _zone_dimensions(circuit, zone)
         for zone in range(circuit.architecture.n_zones)
+    }
+
+
+def _max_zone_dimensions(
+    zone_dimensions: dict[int, tuple[float, float]],
+) -> tuple[float, float]:
+    return (
+        max(width for width, _ in zone_dimensions.values()),
+        max(height for _, height in zone_dimensions.values()),
     )
+
+
+def _zone_dimensions(circuit: MultiZoneCircuit, zone: int) -> tuple[float, float]:
+    transport_capacity = circuit.architecture.get_zone_max_ions_transport(zone)
     ideal_width = max(
         _ZONE_MIN_WIDTH,
-        (2 * _SLOT_MARGIN_X) + ((max_transport_capacity - 1) * _SLOT_GAP_X),
+        (2 * _SLOT_MARGIN_X) + ((transport_capacity - 1) * _SLOT_GAP_X),
     )
     return ideal_width, _ZONE_HEIGHT
 

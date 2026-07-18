@@ -46,6 +46,8 @@ from .qubit_tracker import QubitTracker
 
 logger = logging.getLogger(__name__)
 
+DEBUGGING = False
+
 
 def log_depth_info(depth_info: DepthInfo) -> None:
     logger.debug("--- Depth List ---")
@@ -123,8 +125,9 @@ class HypergraphPartitionGateSelector(GateSelector):
         partitioning = time.perf_counter()
         vertex_to_part = partitioner.partition_hypergraph(shuttle_graph_data, num_zones)
         partitioning = time.perf_counter() - partitioning
-        print(f"data generation time: {data_generation} seconds")
-        print(f"partitioning time: {partitioning} seconds")
+        if DEBUGGING:
+            print(f"data generation time: {data_generation} seconds")
+            print(f"partitioning time: {partitioning} seconds")
         new_placement: ZonePlacement = [[] for _ in range(num_zones)]
         part_to_zone = [-1] * num_zones
         for vertex in range(n_qubits, n_qubits + num_zones):
@@ -158,7 +161,7 @@ class HypergraphPartitionGateSelector(GateSelector):
             handle_unused_qubits(dyn_arch, self._cost_model, qubit_tracker)
         return qubit_tracker.new_placement()
 
-    def get_circuit_shuttle_hypergraph_data(  # noqa: PLR0912
+    def get_circuit_shuttle_hypergraph_data(
         self, dyn_arch: DynamicArch, depth_info: DepthInfo
     ) -> HypergraphData:
         """Calculate graph data for qubit-zone graph to be partitioned"""
@@ -201,32 +204,18 @@ class HypergraphPartitionGateSelector(GateSelector):
                     nets.append(list(block))
                     net_weights.append(weight)
         gate_hyperedges_time = time.perf_counter() - gate_hyperedges_time
-        print(f"gate hyperedges time: {gate_hyperedges_time} seconds")
+        if DEBUGGING:
+            print(f"gate hyperedges time: {gate_hyperedges_time} seconds")
 
         # add shuttling penalty
         shuttling_penalty_time = time.perf_counter()
         max_shuttle_weight = math.floor(max_gate_weight * 0.8)
-        for zone, qubits in enumerate(dyn_arch.trap_configuration.zone_placement):
-            for qubit in qubits:
-                for other_zone in range(num_zones):
-                    if other_zone == zone:
-                        # if src == trg, penalty for moving to an edge becomes reason to stay
-                        penalty = 0
-                    else:
-                        penalty = math.floor(
-                            self.distance_to_closest_port_of_target_zone(
-                                dyn_arch, qubit, zone, other_zone
-                            )
-                            * max_shuttle_weight
-                            * 0.05
-                        )
-                    weight = max_shuttle_weight - penalty
-                    if weight < 1:
-                        continue
-                    nets.append([qubit, other_zone + n_qubits])
-                    net_weights.append(weight)
+        self.add_shuttling_penalty_hyperedges(
+            dyn_arch, nets, net_weights, max_shuttle_weight
+        )
         shuttling_penalty_time = time.perf_counter() - shuttling_penalty_time
-        print(f"shuttling penalty time: {shuttling_penalty_time} seconds")
+        if DEBUGGING:
+            print(f"shuttling penalty time: {shuttling_penalty_time} seconds")
 
         num_vertices = num_spots
         vertex_weights = [1 for _ in range(num_vertices)]
@@ -245,6 +234,96 @@ class HypergraphPartitionGateSelector(GateSelector):
             fixed_list,
             places_per_zone,
         )
+
+    def add_shuttling_penalty_hyperedges(
+        self,
+        dyn_arch: DynamicArch,
+        nets: list[list[int]],
+        net_weights: list[int],
+        max_shuttle_weight: int,
+    ) -> None:
+        if self._cost_model.__class__ is ShuttlePSwapCostModel:
+            self.add_shuttling_penalty_hyperedges_for_pswap_cost_model(
+                dyn_arch, nets, net_weights, max_shuttle_weight
+            )
+            return
+
+        n_qubits = dyn_arch.n_qubits
+        num_zones = dyn_arch.n_zones
+        nets_append = nets.append
+        net_weights_append = net_weights.append
+        for zone, qubits in enumerate(dyn_arch.trap_configuration.zone_placement):
+            for qubit in qubits:
+                for other_zone in range(num_zones):
+                    if other_zone == zone:
+                        # if src == trg, penalty for moving to an edge becomes reason to stay
+                        penalty = 0
+                    else:
+                        penalty = math.floor(
+                            self.distance_to_closest_port_of_target_zone(
+                                dyn_arch, qubit, zone, other_zone
+                            )
+                            * max_shuttle_weight
+                            * 0.05
+                        )
+                    weight = max_shuttle_weight - penalty
+                    if weight < 1:
+                        continue
+                    nets_append([qubit, other_zone + n_qubits])
+                    net_weights_append(weight)
+
+    @staticmethod
+    def add_shuttling_penalty_hyperedges_for_pswap_cost_model(
+        dyn_arch: DynamicArch,
+        nets: list[list[int]],
+        net_weights: list[int],
+        max_shuttle_weight: int,
+    ) -> None:
+        n_qubits = dyn_arch.n_qubits
+        num_zones = dyn_arch.n_zones
+        penalty_scale = max_shuttle_weight * 0.05
+        distance_cutoff = math.ceil(max_shuttle_weight / penalty_scale) - 1
+        zone_vertices = [zone + n_qubits for zone in range(num_zones)]
+        nets_append = nets.append
+        net_weights_append = net_weights.append
+
+        for src_zone, qubits in enumerate(dyn_arch.trap_configuration.zone_placement):
+            if not qubits:
+                continue
+            port_0_path_lengths = dyn_arch.closest_target_zone_port_path_lengths(
+                src_zone, 0, cutoff=distance_cutoff
+            )
+            port_1_path_lengths = dyn_arch.closest_target_zone_port_path_lengths(
+                src_zone, 1, cutoff=distance_cutoff
+            )
+            swap_cost = int(dyn_arch.zone_swap_costs[src_zone])
+            port_1_position = int(dyn_arch.zone_occupancy[src_zone]) - 1
+
+            for qubit in qubits:
+                qubit_position = int(dyn_arch.qubit_to_zone_pos[qubit, 1])
+                source_port_0_cost = qubit_position * swap_cost
+                source_port_1_cost = (port_1_position - qubit_position) * swap_cost
+
+                for target_zone in range(num_zones):
+                    if target_zone == src_zone:
+                        weight = max_shuttle_weight
+                    else:
+                        path_length_0 = port_0_path_lengths[target_zone]
+                        path_length_1 = port_1_path_lengths[target_zone]
+                        distances = []
+                        if path_length_0 is not None:
+                            distances.append(path_length_0 + source_port_0_cost)
+                        if path_length_1 is not None:
+                            distances.append(path_length_1 + source_port_1_cost)
+                        if not distances:
+                            continue
+                        distance = min(distances)
+                        penalty = math.floor(distance * penalty_scale)
+                        weight = max_shuttle_weight - penalty
+                        if weight < 1:
+                            continue
+                    nets_append([qubit, zone_vertices[target_zone]])
+                    net_weights_append(weight)
 
     def distance_to_closest_port_of_target_zone(
         self,

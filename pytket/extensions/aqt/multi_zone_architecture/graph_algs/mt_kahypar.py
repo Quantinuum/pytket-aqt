@@ -22,6 +22,8 @@ from ...multi_zone_architecture.graph_algs.graph import GraphData, HypergraphDat
 
 logger = getLogger(__name__)
 
+DEBUGGING = False
+
 
 @dataclass
 class MtKahyparConfig:
@@ -37,7 +39,8 @@ def configure_mtkahypar(
 ) -> mtkahypar.Initializer:
     global MTK  # noqa: PLW0603
     if MTK is None:
-        print(f"Initializing MtKahypar with nthreads {config.n_threads}")
+        if DEBUGGING:
+            print(f"Initializing MtKahypar with nthreads {config.n_threads}")
         mtkahypar.set_seed(config.random_seed)
         MTK = mtkahypar.initialize(config.n_threads)
     elif warn_configured:
@@ -54,7 +57,7 @@ class MtKahyparPartitioner:
     large_k_cutoff = 1024
 
     def __init__(self) -> None:
-        self.mtk = configure_mtkahypar(MtKahyparConfig(), warn_configured=True)
+        self.mtk = configure_mtkahypar(MtKahyparConfig(), warn_configured=False)
         self.context = self.mtk.context_from_preset(mtkahypar.PresetType.DEFAULT)
         self.context.logging = False
 
@@ -143,8 +146,9 @@ class MtKahyparPartitioner:
         :param num_parts: Number of partitions
         """
         self._update_context(num_parts)
-        hypergraph_data.print_hypergraph()
-        print(f"num_parts: {num_parts}")
+        if DEBUGGING:
+            hypergraph_data.print_hypergraph()
+            print(f"num_parts: {num_parts}")
         avg_part_weight = sum(hypergraph_data.vertex_weights) / num_parts
         self.context.set_partitioning_parameters(
             num_parts,
@@ -161,7 +165,8 @@ class MtKahyparPartitioner:
         partition_start = time.perf_counter()
         part_graph = graph.partition(self.context)
         partition_seconds = time.perf_counter() - partition_start
-        print(f"partitioning time: {partition_seconds} seconds")
+        if DEBUGGING:
+            print(f"partitioning time: {partition_seconds} seconds")
         dbg_msg = f"cut_cost: {part_graph.cut()}"
         logger.debug(dbg_msg)
         vertex_part_id: list[int] = []

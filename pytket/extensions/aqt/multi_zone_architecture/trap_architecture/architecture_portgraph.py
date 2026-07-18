@@ -12,6 +12,7 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 from collections.abc import Callable
+from typing import cast
 
 from networkx import (
     Graph,
@@ -67,6 +68,7 @@ class MultiZonePortGraph:
         self.swap_costs = [zone.swap_cost for zone in spec.zones]
 
         self.port_graph: Graph[int] = Graph()
+        self.n_zones = spec.n_zones
         placement = start_config.zone_placement
 
         # Add "capacity" edges between the two ports of a single zone.
@@ -109,6 +111,9 @@ class MultiZonePortGraph:
             tuple[int, int, int, int],
             tuple[list[int], int, int] | tuple[None, None, None],
         ] = {}
+        self._target_zone_path_lengths_cache: dict[
+            tuple[int, int, int, int | None], list[int | None]
+        ] = {}
 
     def update_zone_occupancy_weight(self, zone: int, zone_occupancy: int) -> None:
         edge_dict = self.port_graph.edges[
@@ -121,6 +126,7 @@ class MultiZonePortGraph:
         )
         edge_dict["transport_cost"] = zone_occupancy * self.swap_costs[zone]
         self._path_cache.clear()
+        self._target_zone_path_lengths_cache.clear()
 
     def shuttle_edge_transport_cost(
         self, src_zone: int, src_port: int, trg_zone: int, trg_port: int
@@ -136,10 +142,11 @@ class MultiZonePortGraph:
         start_zone: int,
         start_port: int,
         targ_zone: int,
-        targ_port,
+        targ_port: int,
         n_move: int = 1,
     ) -> tuple[list[int], int, int] | tuple[None, None, None]:
         """Return the shortest path length for going from starting (zone, port) target (zone, port)"""
+        raise NotImplementedError
 
     def shortest_port_path_length(
         self, start_zone: int, start_port: int, targ_zone: int, n_move: int = 1
@@ -170,6 +177,58 @@ class MultiZonePortGraph:
             start_zone, start_port, targ_zone, n_move
         )
         self._path_cache[(start_zone, start_port, targ_zone, n_move)] = result
+        return result
+
+    def closest_target_zone_port_path_lengths(
+        self,
+        start_zone: int,
+        start_port: int,
+        n_move: int = 1,
+        cutoff: int | None = None,
+    ) -> list[int | None]:
+        """Return shortest path lengths from a source port to each target zone.
+
+        For each target zone, the returned entry is the distance to the cheaper
+        of the target zone's two ports. A value of ``None`` means no target port
+        was reachable within the optional cutoff.
+        """
+        cache_key = (start_zone, start_port, n_move, cutoff)
+        cache_result = self._target_zone_path_lengths_cache.get(cache_key)
+        if cache_result is not None:
+            return cache_result
+
+        port_id_start = zone_port_to_port_id(start_zone, start_port)
+
+        def move_weight(u: int, v: int, d: dict[str, int]) -> int | None:
+            if d["is_shuttle_edge"]:
+                return d["transport_cost"]
+            return (
+                d["transport_cost"] * n_move
+                if d["transport_capacity"] >= n_move
+                else None
+            )
+
+        raw_lengths, _ = single_source_dijkstra(
+            self.port_graph,
+            port_id_start,
+            cutoff=cutoff,
+            weight="transport_cost" if n_move == 1 else move_weight,
+        )
+        lengths = cast("dict[int, int]", raw_lengths)
+        result: list[int | None] = []
+        for target_zone in range(self.n_zones):
+            target_port_0 = zone_port_to_port_id(target_zone, 0)
+            target_port_1 = zone_port_to_port_id(target_zone, 1)
+            length_0 = lengths.get(target_port_0)
+            length_1 = lengths.get(target_port_1)
+            if length_0 is None:
+                result.append(length_1)
+            elif length_1 is None:
+                result.append(length_0)
+            else:
+                result.append(min(length_0, length_1))
+
+        self._target_zone_path_lengths_cache[cache_key] = result
         return result
 
     def uncached_shortest_port_path_length(
